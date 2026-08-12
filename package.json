@@ -1,0 +1,22 @@
+{
+  "name": "genebaer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extensible genetic algorithm runner with live web visualizer",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0",
+    "prettier": "^3.5.0"
+  }
+}
