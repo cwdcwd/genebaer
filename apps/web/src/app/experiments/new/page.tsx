@@ -103,10 +103,23 @@ export default function NewExperimentPage() {
     return encodings;
   }, [encodings, problemMeta]);
 
-  const compatibleSelections = selections.filter((s) => compatible(s, encoding?.id));
-  const compatibleCrossovers = crossovers.filter((c) => compatible(c, encoding?.id));
-  const compatibleMutations = mutations.filter((m) => compatible(m, encoding?.id));
-  const compatibleTerminations = terminationOps.filter((t) => compatible(t, encoding?.id));
+  const encId = encoding?.id;
+  const compatibleSelections = useMemo(
+    () => selections.filter((s) => compatible(s, encId)),
+    [selections, encId],
+  );
+  const compatibleCrossovers = useMemo(
+    () => crossovers.filter((c) => compatible(c, encId)),
+    [crossovers, encId],
+  );
+  const compatibleMutations = useMemo(
+    () => mutations.filter((m) => compatible(m, encId)),
+    [mutations, encId],
+  );
+  const compatibleTerminations = useMemo(
+    () => terminationOps.filter((t) => compatible(t, encId)),
+    [terminationOps, encId],
+  );
 
   const pickOp = useCallback(
     (kind: "selection" | "crossover" | "mutation", candidates: OperatorMeta[], keep?: OperatorState | null): OperatorState | null => {

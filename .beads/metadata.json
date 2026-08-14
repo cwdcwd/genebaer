@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "genebaer",
+  "project_id": "8856836a-87bc-4f24-919b-bba6b67dc63d"
+}
