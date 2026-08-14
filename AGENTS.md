@@ -53,13 +53,18 @@ bd ready                                  # select highest-priority unblocked wo
 bd update <id> --claim
 git switch -c bead/<id>                   # never work on master
 # ...implement...
-pnpm typecheck && pnpm test               # gates must pass; do not proceed on red
-git commit -m "<summary> (<id>)"
+pnpm typecheck && pnpm test && pnpm lint  # gates must pass; do not proceed on red
+bd close <id>                             # BEFORE committing — see note
+git add -A && git commit -m "<summary> (<id>)"
 git push -u origin HEAD
 gh pr create --title "<summary> (<id>)" --body "Closes <id>. <what changed, gate results>"
-bd close <id>
 git switch master                         # leave the tree clean for the next iteration
 ```
+
+**Close the bead before committing.** `bd close` re-exports `.beads/issues.jsonl`,
+which is a tracked file. Closing after the commit dirties the working tree and
+blocks the switch back to `master`, stranding the loop. Closing first lets the
+export ride along in the same commit.
 
 **Gate honesty is the core discipline of this experiment.** Never report a gate
 as passing that did not execute. If a gate is a no-op, say so and file a bead.
