@@ -173,6 +173,104 @@ describe("genebaer server", () => {
     expect(detail.status).toBe("stopped");
   });
 
+  it("unsubscribing from one run leaves the socket's other subscriptions intact", async () => {
+    const { baseUrl, wsUrl } = await bootServer();
+
+    const startLongRun = async (): Promise<string> => {
+      const cfg = oneMaxConfig();
+      // No target-fitness: this run must keep streaming for the whole test.
+      cfg.termination = [{ id: "max-generations", params: { maxGenerations: 1_000_000 } }];
+      const res = await fetch(`${baseUrl}/api/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: cfg }),
+      });
+      return ((await res.json()) as CreateRunResponse).runId;
+    };
+    const stopRun = (id: string): Promise<Response> =>
+      fetch(`${baseUrl}/api/runs/${id}/control`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+      });
+
+    const counts = new Map<string, number>();
+    const ws = new WebSocket(wsUrl);
+    await new Promise<void>((resolve) => ws.on("open", () => resolve()));
+    ws.on("message", (raw: Buffer) => {
+      const msg = JSON.parse(raw.toString()) as WsServerMessage;
+      counts.set(msg.runId, (counts.get(msg.runId) ?? 0) + 1);
+    });
+
+    const runA = await startLongRun();
+    const runB = await startLongRun();
+    ws.send(JSON.stringify({ type: "subscribe", runId: runA }));
+    ws.send(JSON.stringify({ type: "subscribe", runId: runB }));
+
+    // Wait until both are actually streaming before touching anything.
+    for (let i = 0; i < 100; i++) {
+      if ((counts.get(runA) ?? 0) > 0 && (counts.get(runB) ?? 0) > 0) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(counts.get(runA) ?? 0).toBeGreaterThan(0);
+    expect(counts.get(runB) ?? 0).toBeGreaterThan(0);
+
+    ws.send(JSON.stringify({ type: "unsubscribe", runId: runA }));
+    // Let any already-in-flight frames land before snapshotting.
+    await new Promise((r) => setTimeout(r, 100));
+    const aAtUnsub = counts.get(runA) ?? 0;
+    const bAtUnsub = counts.get(runB) ?? 0;
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The regression: B's subscription used to be torn down along with A's.
+    expect(counts.get(runB) ?? 0).toBeGreaterThan(bAtUnsub);
+    // And A really is unsubscribed.
+    expect(counts.get(runA) ?? 0).toBe(aAtUnsub);
+
+    ws.close();
+    await Promise.all([stopRun(runA), stopRun(runB)]);
+  });
+
+  it("re-subscribing to the same run does not double-deliver its messages", async () => {
+    const { baseUrl, wsUrl } = await bootServer();
+
+    const cfg = oneMaxConfig();
+    cfg.termination = [{ id: "max-generations", params: { maxGenerations: 1_000_000 } }];
+    const res = await fetch(`${baseUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: cfg }),
+    });
+    const { runId } = (await res.json()) as CreateRunResponse;
+
+    const generations: number[] = [];
+    const ws = new WebSocket(wsUrl);
+    await new Promise<void>((resolve) => ws.on("open", () => resolve()));
+    ws.on("message", (raw: Buffer) => {
+      const msg = JSON.parse(raw.toString()) as WsServerMessage;
+      if (msg.type === "generation") generations.push(msg.stats.generation);
+    });
+
+    // Subscribe twice: the second must replace the first, not stack on it.
+    ws.send(JSON.stringify({ type: "subscribe", runId }));
+    ws.send(JSON.stringify({ type: "subscribe", runId }));
+
+    for (let i = 0; i < 100; i++) {
+      if (generations.length > 5) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    ws.close();
+    await fetch(`${baseUrl}/api/runs/${runId}/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "stop" }),
+    });
+
+    expect(generations.length).toBeGreaterThan(5);
+    expect(new Set(generations).size).toBe(generations.length);
+  });
+
   it("rejects bad config with 400", async () => {
     const { baseUrl } = await bootServer();
     const res = await fetch(`${baseUrl}/api/runs`, {
