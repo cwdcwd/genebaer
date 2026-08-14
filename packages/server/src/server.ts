@@ -102,30 +102,30 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     const { id } = req.params as { id: string };
     const parsed = controlSchema.safeParse(req.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.flatten() }) as never;
+      return reply.code(400).send({ error: parsed.error.flatten() });
     }
     try {
       runManager.control(id, parsed.data.action);
       return { ok: true, status: runManager.status(id) };
     } catch (err) {
       if (err instanceof RunNotFoundError) {
-        return reply.code(404).send({ error: err.message }) as never;
+        return reply.code(404).send({ error: err.message });
       }
-      return reply.code(409).send({ error: (err as Error).message }) as never;
+      return reply.code(409).send({ error: (err as Error).message });
     }
   });
 
   app.get("/api/runs/:id/visual", async (req, reply) => {
     const { id } = req.params as { id: string };
     const frame = runManager.visualFrame(id);
-    if (!frame) return reply.code(404).send({ error: "No visual frame" }) as never;
+    if (!frame) return reply.code(404).send({ error: "No visual frame" });
     return frame;
   });
 
   app.delete("/api/runs/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!runManager.deleteRun(id)) {
-      return reply.code(404).send({ error: "Not found" }) as never;
+      return reply.code(404).send({ error: "Not found" });
     }
     return { ok: true };
   });

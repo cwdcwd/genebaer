@@ -12,7 +12,9 @@ export class SwapMutation extends MutationOperator<unknown> {
   override mutate(genome: unknown, rate: number, rng: RandomSource): unknown {
     if (rng.next() >= rate) return genome;
     if (Array.isArray(genome)) {
-      const g = genome;
+      // Array.isArray() narrows `unknown` to `any[]`, not `unknown[]`, so bind
+      // through an explicit type to keep the rest of this branch type-safe.
+      const g: unknown[] = genome;
       if (g.length < 2) return g;
       const i = rng.int(0, g.length);
       const j = rng.int(0, g.length);

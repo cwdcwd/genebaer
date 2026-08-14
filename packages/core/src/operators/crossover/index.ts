@@ -11,12 +11,16 @@ export class OnePointCrossover extends CrossoverOperator<unknown> {
 
   override crossover(a: unknown, b: unknown, rng: RandomSource): [unknown, unknown] {
     if (Array.isArray(a) && Array.isArray(b)) {
-      const n = Math.min(a.length, b.length);
-      if (n < 2) return [a.slice(), b.slice()];
+      // Array.isArray() narrows `unknown` to `any[]`, not `unknown[]`. Binding
+      // through an explicit type keeps the spreads below type-safe.
+      const av: unknown[] = a;
+      const bv: unknown[] = b;
+      const n = Math.min(av.length, bv.length);
+      if (n < 2) return [av.slice(), bv.slice()];
       const cut = rng.int(1, n);
       return [
-        [...a.slice(0, cut), ...b.slice(cut)],
-        [...b.slice(0, cut), ...a.slice(cut)],
+        [...av.slice(0, cut), ...bv.slice(cut)],
+        [...bv.slice(0, cut), ...av.slice(cut)],
       ];
     }
     if (typeof a === "string" && typeof b === "string") {
@@ -39,14 +43,16 @@ export class TwoPointCrossover extends CrossoverOperator<unknown> {
 
   override crossover(a: unknown, b: unknown, rng: RandomSource): [unknown, unknown] {
     if (Array.isArray(a) && Array.isArray(b)) {
-      const n = Math.min(a.length, b.length);
-      if (n < 2) return [a.slice(), b.slice()];
+      const av: unknown[] = a;
+      const bv: unknown[] = b;
+      const n = Math.min(av.length, bv.length);
+      if (n < 2) return [av.slice(), bv.slice()];
       let i = rng.int(0, n - 1);
       let j = rng.int(i + 1, n);
       if (i > j) [i, j] = [j, i];
       return [
-        [...a.slice(0, i), ...b.slice(i, j), ...a.slice(j)],
-        [...b.slice(0, i), ...a.slice(i, j), ...b.slice(j)],
+        [...av.slice(0, i), ...bv.slice(i, j), ...av.slice(j)],
+        [...bv.slice(0, i), ...av.slice(i, j), ...bv.slice(j)],
       ];
     }
     if (typeof a === "string" && typeof b === "string") {
@@ -103,8 +109,8 @@ export class UniformCrossover extends CrossoverOperator<unknown> {
     }
     if (typeof a === "string" && typeof b === "string") {
       const n = Math.min(a.length, b.length);
-      const c1: string[] = new Array(n);
-      const c2: string[] = new Array(n);
+      const c1 = new Array<string>(n);
+      const c2 = new Array<string>(n);
       for (let i = 0; i < n; i++) {
         if (rng.next() < p) {
           c1[i] = b[i] as string;

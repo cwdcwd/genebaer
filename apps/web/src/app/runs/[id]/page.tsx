@@ -171,22 +171,22 @@ export default function RunDetailPage({
             </CardHeader>
             <div className="flex flex-wrap gap-2">
               {status === "running" && (
-                <Button size="sm" variant="secondary" onClick={() => sendControl("pause")}>
+                <Button size="sm" variant="secondary" onClick={() => { void sendControl("pause"); }}>
                   ⏸ Pause
                 </Button>
               )}
               {(status === "paused" || status === "pending") && (
-                <Button size="sm" onClick={() => sendControl("resume")}>
+                <Button size="sm" onClick={() => { void sendControl("resume"); }}>
                   ▶ Resume
                 </Button>
               )}
               {status === "paused" && (
-                <Button size="sm" variant="outline" onClick={() => sendControl("step")}>
+                <Button size="sm" variant="outline" onClick={() => { void sendControl("step"); }}>
                   ⏭ Step
                 </Button>
               )}
               {live && (
-                <Button size="sm" variant="danger" onClick={() => sendControl("stop")}>
+                <Button size="sm" variant="danger" onClick={() => { void sendControl("stop"); }}>
                   ■ Stop
                 </Button>
               )}

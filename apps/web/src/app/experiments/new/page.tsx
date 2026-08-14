@@ -581,7 +581,7 @@ export default function NewExperimentPage() {
           size="md"
           className="w-full text-base"
           disabled={submitting || !problem || !encoding || terminations.length === 0}
-          onClick={startRun}
+          onClick={() => { void startRun(); }}
         >
           {submitting ? "Starting…" : "Start run →"}
         </Button>
