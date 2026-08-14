@@ -6,7 +6,6 @@ import { z } from "zod";
 import type {
   CreateRunResponse,
   OperatorMeta,
-  RunControlRequest,
   RunDetail,
   RunSummary,
   WsClientMessage,

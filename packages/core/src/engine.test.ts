@@ -24,7 +24,6 @@ import {
   Rastrigin,
   Weasel,
   MinimumDominatingSet,
-  OperatorRegistry,
   createDefaultRegistry,
   GeneticAlgorithmEngine,
   type RunConfig,

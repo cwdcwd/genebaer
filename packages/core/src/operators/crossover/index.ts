@@ -139,7 +139,8 @@ export class ArithmeticCrossover extends CrossoverOperator<unknown> {
   } as const;
   static readonly compatibleEncodings = ["numeric"] as const;
 
-  override crossover(a: unknown, b: unknown, rng: RandomSource): [unknown, unknown] {
+  // Deterministic: alpha is a configured parameter, so no randomness is drawn.
+  override crossover(a: unknown, b: unknown, _rng: RandomSource): [unknown, unknown] {
     const alphaRaw = this.params["alpha"];
     const alpha =
       typeof alphaRaw === "number" && Number.isFinite(alphaRaw)

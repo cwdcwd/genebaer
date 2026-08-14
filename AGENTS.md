@@ -13,6 +13,68 @@ This project uses **bd** (beads) for issue tracking. Run `bd prime` for full wor
 > source of truth; don't `bd import` during normal operation; don't
 > reach for third-party Dolt hosting before trying the default).
 
+## Operating Mode: Team-Maintainer (explicit opt-in)
+
+> This section is the repository's explicit opt-in required by **Agent Context
+> Profiles** below. It is hand-maintained and lives outside the managed Beads
+> block on purpose — do not move it inside, or `bd setup` will overwrite it.
+> Mirrored in CLAUDE.md; keep both copies in sync.
+
+This repo is an experiment in loop engineering / software-factory management.
+Agents run the full implement→validate→publish cycle without asking for
+approval at each step.
+
+**Granted authority.** An agent may, on its own initiative:
+
+- Create, claim, update, and close beads
+- Run quality gates (`pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build`)
+- Create branches, commit, and push *those branches* to `origin`
+- Open pull requests against `master`
+- Run `bd dolt push` / `bd dolt pull` to sync issue state
+
+**Withheld — always requires an explicit request in the current session:**
+
+- **Merging a PR.** The human merges. This is the review gate; the loop stops here.
+- **Pushing directly to `master`**, or any push that bypasses a PR
+- **Force-push, history rewrite, or branch deletion** on `master`
+- Committing anything gitignored or credential-bearing (`.env`, `.env.local`,
+  `.beads-credential-key`, `.dolt/`, `*.db`, `.beads/proxieddb/`)
+- Changing this section, repo visibility, or remote configuration
+
+**This repo is PUBLIC.** Every push and every committed issue body in
+`.beads/issues.jsonl` is world-readable. Treat all of it as published.
+
+### Loop protocol
+
+One bead per iteration, one branch per bead:
+
+```bash
+bd ready                                  # select highest-priority unblocked work
+bd update <id> --claim
+git switch -c bead/<id>                   # never work on master
+# ...implement...
+pnpm typecheck && pnpm test && pnpm lint  # gates must pass; do not proceed on red
+bd close <id>                             # BEFORE committing — see note
+git add -A && git commit -m "<summary> (<id>)"
+git push -u origin HEAD
+gh pr create --title "<summary> (<id>)" --body "Closes <id>. <what changed, gate results>"
+git switch master                         # leave the tree clean for the next iteration
+```
+
+**Close the bead before committing.** `bd close` re-exports `.beads/issues.jsonl`,
+which is a tracked file. Closing after the commit dirties the working tree and
+blocks the switch back to `master`, stranding the loop. Closing first lets the
+export ride along in the same commit.
+
+**Gate honesty is the core discipline of this experiment.** Never report a gate
+as passing that did not execute. If a gate is a no-op, say so and file a bead.
+If gates go red, stop the iteration and report — do not commit around a
+failure, weaken an assertion, or skip a gate to close a bead.
+
+Current gate status: `typecheck`, `test`, `lint`, and `build` are all real. The
+remaining gap is that `apps/web` and `packages/shared-types` have no test suites
+(genebaer-ehd). See CLAUDE.md for the full gate table.
+
 ## Quick Reference
 
 ```bash
