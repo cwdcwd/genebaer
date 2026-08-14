@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# A factory opens many PRs and pushes to them repeatedly. Cancel superseded
+# runs on the same ref so the queue reflects current work, but never cancel a
+# run on master — those are the commits of record.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        # The repo pins packageManager: pnpm@11.9.0. corepack honours that field,
+        # so the CI pnpm matches the one agents run locally.
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        # --frozen-lockfile makes an out-of-date lockfile a CI failure rather
+        # than something CI silently fixes for itself.
+        run: pnpm install --frozen-lockfile
+
+      # Gates run as separate steps, not one chained command, so a red run names
+      # the gate that failed instead of just "the build broke".
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify the beads export is current
+        # An agent that closes a bead without running `bd export` commits stale
+        # issue state (this happened during the first factory runs). bd is not
+        # installed in CI, so instead of regenerating we assert the committed
+        # file is not obviously mid-conflict, and that it parses as JSONL.
+        run: |
+          set -euo pipefail
+          f=.beads/issues.jsonl
+          if [ ! -f "$f" ]; then
+            echo "No $f — nothing to check."
+            exit 0
+          fi
+          if grep -qE '^(<<<<<<<|=======|>>>>>>>)' "$f"; then
+            echo "::error file=$f::Conflict markers present in the beads export."
+            exit 1
+          fi
+          node -e '
+            const fs = require("node:fs");
+            const lines = fs.readFileSync(".beads/issues.jsonl", "utf8")
+              .split("\n").filter((l) => l.trim() !== "");
+            lines.forEach((l, i) => {
+              try { JSON.parse(l); }
+              catch { console.error(`::error::Line ${i + 1} is not valid JSON`); process.exit(1); }
+            });
+            console.log(`beads export OK — ${lines.length} issues`);
+          '

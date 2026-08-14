@@ -26,6 +26,8 @@ approval at each step.
 
 **Granted authority.** An agent may, on its own initiative:
 
+- **Survey the repo, decide what is worth doing, and file beads for it.**
+  Agents are self-directed: you are not limited to work someone else scoped.
 - Create, claim, update, and close beads
 - Run quality gates (`pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build`)
 - Create branches, commit, and push *those branches* to `origin`
@@ -81,6 +83,73 @@ Current gate status: `typecheck`, `test`, `lint`, and `build` are all real and
 cover all 4 packages (99 tests). Note that `shared-types` is tested at the type
 level only (`vitest run --typecheck`) because it emits no runtime code. See
 CLAUDE.md for the full gate table.
+
+### Self-directed work
+
+Agents choose their own work. `bd ready` is the queue, but when it is empty or
+nothing there is worth doing, survey the repo and file what is.
+
+**Justifies a bead:** a gate that does not gate, a documented behavior that is
+not true, a sharp edge that has become a real bug, dead or duplicated code, a
+missing test for logic that can silently break.
+
+**Does not:** speculative refactors, dependency bumps with no failing symptom,
+restyling working code, or "improvements" to something you have not first shown
+to be broken. Prefer one finished bead over three opened ones.
+
+Two hard limits:
+
+- **Do not redefine the mission.** Adding a capability nobody asked for is out
+  of scope even if the code would be better for it. Fix and harden what exists.
+- **Do not touch this section, the gates, or CI to make your own work easier.**
+  Weakening the referee to get a green run is the one unrecoverable failure in a
+  factory. If a gate is wrong, file a bead saying so and leave it red.
+
+### Running agents in parallel
+
+**1. Claim before you work.** `bd update <id> --claim` takes a ~5 minute lease
+(`lease_expires_at`), so two agents cannot hold the same bead. Release a bead
+abandoned by a crashed agent with `bd unclaim <id>`. Never work an issue you did
+not successfully claim.
+
+**2. Isolate your checkout.** One agent per working tree — concurrent agents in
+one directory fight over the index, the branch, and `.beads/`:
+
+```bash
+git worktree add ../genebaer-<id> -b bead/<id> master
+cd ../genebaer-<id> && pnpm install
+```
+
+Override ports if you run the app (`PORT` for the server, `next dev -p` for
+web); two agents on defaults collide on 4040/3000. Tests are already
+parallel-safe — the server suite uses in-memory SQLite.
+
+**3. Let the merge driver handle `.beads/issues.jsonl`.** Every bead rewrites
+it, so any two concurrent branches conflict there. `.gitattributes` maps it to a
+`beads-export` driver that regenerates it from the Dolt DB.
+
+Install **once per clone** with `pnpm setup:git`; worktrees share `.git/config`
+and inherit it. The `prepare` script also runs it, but pnpm skips lifecycle
+scripts when the install is already up to date, so `pnpm install` only covers a
+genuinely fresh checkout. Verify with
+`git config --get merge.beads-export.driver` (expect `bd export -o %A`).
+
+Never hand-merge that file. Conflict markers mean the driver is missing: run
+`pnpm setup:git`, then resolve with `bd export -o .beads/issues.jsonl`. The
+driver regenerates from the local Dolt DB, so across machines `bd dolt pull`
+first.
+
+### CI is the referee
+
+`.github/workflows/ci.yml` runs all four gates on every PR and on `master`, and
+the check is **required** — `master` rejects a merge whose gates failed.
+
+This does not replace running gates locally. Push only when green on your
+machine; CI catches what a local run missed and makes "gates passed"
+independently verifiable. A red CI run on your own PR is yours to fix.
+
+**The human still merges.** CI decides whether a PR *may* merge; a person
+decides whether it *should*.
 
 ## Quick Reference
 
