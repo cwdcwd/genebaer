@@ -43,16 +43,29 @@ git switch -c bead/<id>                   # never work on master
 # ...implement...
 pnpm typecheck && pnpm test && pnpm lint  # gates must pass; do not proceed on red
 bd close <id>                             # BEFORE committing — see note
+bd export -o .beads/issues.jsonl          # force a synchronous export — see note
 git add -A && git commit -m "<summary> (<id>)"
 git push -u origin HEAD
 gh pr create --title "<summary> (<id>)" --body "Closes <id>. <what changed, gate results>"
 git switch master                         # leave the tree clean for the next iteration
 ```
 
-**Close the bead before committing.** `bd close` re-exports `.beads/issues.jsonl`,
-which is a tracked file. Closing after the commit dirties the working tree and
-blocks the switch back to `master`, stranding the loop. Closing first lets the
-export ride along in the same commit.
+**Close the bead, force the export, then commit.** `.beads/issues.jsonl` is a
+tracked file written by beads itself, and `export.auto = true` flushes it on a
+**60s debounce** — not synchronously with `bd close`. That race has two distinct
+symptoms, and both have bitten this repo:
+
+1. `git add` immediately after `bd close` stages the *stale* JSONL, committing
+   issue state that reads `in_progress` for work that is actually closed.
+2. The debounce then fires after the commit, dirtying the tree and aborting
+   `git switch master` — stranding the iteration.
+
+`bd export -o .beads/issues.jsonl` writes synchronously and closes the race.
+Never rely on the auto-export having run.
+
+`bd export` excludes `bd remember` memories by default. Keep it that way: this
+repo is PUBLIC and memories may carry agent context that should not be
+published. Do not add `--include-memories`.
 
 **Gate honesty is the core discipline of this experiment.** Never report a gate
 as passing that did not execute. If a gate is a no-op, say so and file a bead.
@@ -136,7 +149,7 @@ pnpm dev         # turbo run dev: server + web visualizer
 | Gate | Real? | Coverage |
 | --- | --- | --- |
 | `typecheck` | yes | all 4 packages |
-| `test` | yes | `core`, `server` only — `web` and `shared-types` have no suites (genebaer-ehd) |
+| `test` | yes | all 4 packages — 99 tests (core 36, server 5, web 37, shared-types 21 type-level) |
 | `lint` | yes | all 4 packages; ESLint flat config at repo root, `--max-warnings=0` |
 | `build` | yes | all 4 packages |
 
@@ -144,9 +157,18 @@ pnpm dev         # turbo run dev: server + web visualizer
 runs `eslint . --config ../../eslint.config.mjs --max-warnings=0`, so config
 patterns must stay relative. Type-aware rules are not enabled yet (genebaer-bum).
 
-The one gap left is test coverage: `apps/web` and `packages/shared-types` still
-have no suites, so they are covered by typecheck, lint, and build — but nothing
-asserts their behavior.
+**Testing.** vitest everywhere, but two different modes:
+
+- `core`, `server`, `web` — ordinary runtime tests. `web` runs under jsdom with
+  Testing Library; its vitest config deliberately omits `@vitejs/plugin-react`
+  (incompatible Vite internals) and uses esbuild's `jsx: "automatic"` instead.
+- `shared-types` — **type-level only** (`*.test-d.ts`, `vitest run --typecheck`).
+  The package emits no runtime code, so a runtime test there would assert
+  nothing. These tests guard the server↔web wire contract, which otherwise
+  breaks silently.
+
+When adding a package, add its test script in the matching mode. A package with
+no suite is a hole in the gate, not a package that "passes".
 
 ## Architecture Overview
 

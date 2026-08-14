@@ -55,25 +55,32 @@ git switch -c bead/<id>                   # never work on master
 # ...implement...
 pnpm typecheck && pnpm test && pnpm lint  # gates must pass; do not proceed on red
 bd close <id>                             # BEFORE committing — see note
+bd export -o .beads/issues.jsonl          # force a synchronous export — see note
 git add -A && git commit -m "<summary> (<id>)"
 git push -u origin HEAD
 gh pr create --title "<summary> (<id>)" --body "Closes <id>. <what changed, gate results>"
 git switch master                         # leave the tree clean for the next iteration
 ```
 
-**Close the bead before committing.** `bd close` re-exports `.beads/issues.jsonl`,
-which is a tracked file. Closing after the commit dirties the working tree and
-blocks the switch back to `master`, stranding the loop. Closing first lets the
-export ride along in the same commit.
+**Close the bead, force the export, then commit.** `.beads/issues.jsonl` is a
+tracked file written by beads itself, and `export.auto = true` flushes it on a
+**60s debounce** — not synchronously with `bd close`. Committing without a
+forced export stages stale issue state, and the debounce then fires afterward,
+dirtying the tree and aborting `git switch master`. `bd export -o
+.beads/issues.jsonl` writes synchronously and closes the race.
+
+`bd export` excludes `bd remember` memories by default. Keep it that way: this
+repo is PUBLIC. Do not add `--include-memories`.
 
 **Gate honesty is the core discipline of this experiment.** Never report a gate
 as passing that did not execute. If a gate is a no-op, say so and file a bead.
 If gates go red, stop the iteration and report — do not commit around a
 failure, weaken an assertion, or skip a gate to close a bead.
 
-Current gate status: `typecheck`, `test`, `lint`, and `build` are all real. The
-remaining gap is that `apps/web` and `packages/shared-types` have no test suites
-(genebaer-ehd). See CLAUDE.md for the full gate table.
+Current gate status: `typecheck`, `test`, `lint`, and `build` are all real and
+cover all 4 packages (99 tests). Note that `shared-types` is tested at the type
+level only (`vitest run --typecheck`) because it emits no runtime code. See
+CLAUDE.md for the full gate table.
 
 ## Quick Reference
 
