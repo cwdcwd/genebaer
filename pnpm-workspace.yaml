@@ -2,8 +2,13 @@ packages:
   - "packages/*"
   - "apps/*"
 
+# Keep in sync with onlyBuiltDependencies below. A package listed there but
+# missing here still counts as an ignored build, which fails a clean
+# `pnpm install` with ERR_PNPM_IGNORED_BUILDS — invisible locally once the
+# approval is cached, but fatal in CI. esbuild arrives via vitest.
 allowBuilds:
   better-sqlite3: true
+  esbuild: true
   sharp: true
 
 onlyBuiltDependencies:
