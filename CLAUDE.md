@@ -136,7 +136,7 @@ pnpm dev         # turbo run dev: server + web visualizer
 | Gate | Real? | Coverage |
 | --- | --- | --- |
 | `typecheck` | yes | all 4 packages |
-| `test` | yes | `core`, `server` only — `web` and `shared-types` have no suites (genebaer-ehd) |
+| `test` | yes | all 4 packages — 99 tests (core 36, server 5, web 37, shared-types 21 type-level) |
 | `lint` | yes | all 4 packages; ESLint flat config at repo root, `--max-warnings=0` |
 | `build` | yes | all 4 packages |
 
@@ -144,9 +144,18 @@ pnpm dev         # turbo run dev: server + web visualizer
 runs `eslint . --config ../../eslint.config.mjs --max-warnings=0`, so config
 patterns must stay relative. Type-aware rules are not enabled yet (genebaer-bum).
 
-The one gap left is test coverage: `apps/web` and `packages/shared-types` still
-have no suites, so they are covered by typecheck, lint, and build — but nothing
-asserts their behavior.
+**Testing.** vitest everywhere, but two different modes:
+
+- `core`, `server`, `web` — ordinary runtime tests. `web` runs under jsdom with
+  Testing Library; its vitest config deliberately omits `@vitejs/plugin-react`
+  (incompatible Vite internals) and uses esbuild's `jsx: "automatic"` instead.
+- `shared-types` — **type-level only** (`*.test-d.ts`, `vitest run --typecheck`).
+  The package emits no runtime code, so a runtime test there would assert
+  nothing. These tests guard the server↔web wire contract, which otherwise
+  breaks silently.
+
+When adding a package, add its test script in the matching mode. A package with
+no suite is a hole in the gate, not a package that "passes".
 
 ## Architecture Overview
 

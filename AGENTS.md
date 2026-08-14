@@ -71,9 +71,10 @@ as passing that did not execute. If a gate is a no-op, say so and file a bead.
 If gates go red, stop the iteration and report — do not commit around a
 failure, weaken an assertion, or skip a gate to close a bead.
 
-Current gate status: `typecheck`, `test`, `lint`, and `build` are all real. The
-remaining gap is that `apps/web` and `packages/shared-types` have no test suites
-(genebaer-ehd). See CLAUDE.md for the full gate table.
+Current gate status: `typecheck`, `test`, `lint`, and `build` are all real and
+cover all 4 packages (99 tests). Note that `shared-types` is tested at the type
+level only (`vitest run --typecheck`) because it emits no runtime code. See
+CLAUDE.md for the full gate table.
 
 ## Quick Reference
 
