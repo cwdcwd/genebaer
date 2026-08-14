@@ -167,6 +167,8 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   });
 
   app.addHook("onClose", async () => {
+    // Order matters: halt the engines before closing the database they write to.
+    runManager.shutdown();
     store.close();
   });
 

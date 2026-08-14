@@ -117,6 +117,12 @@ export interface RunSummary {
   finishedAt: number | null;
   finalBestFitness: number | null;
   currentGeneration: number;
+  /**
+   * Why the run reached its terminal status — the same text the `finished` WS
+   * message carries, but persisted. Absent while a run is still live, and for
+   * rows written before this field existed.
+   */
+  stopReason?: string;
 }
 
 // ---------- REST DTOs ----------

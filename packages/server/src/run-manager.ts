@@ -35,6 +35,18 @@ export class RunManager {
   constructor(store: RunStore, registry?: OperatorRegistry) {
     this.store = store;
     this.registry = registry ?? createDefaultRegistry();
+
+    // Engines exist only in memory, so on a fresh process nothing can still be
+    // running. Any row left non-terminal belongs to a process that died; close
+    // those out now, before the API can serve them as live.
+    const interrupted = this.store.reconcileInterruptedRuns(
+      "Interrupted — the server restarted while this run was in progress",
+    );
+    if (interrupted.length > 0) {
+      console.warn(
+        `[genebaer] reconciled ${interrupted.length} run(s) interrupted by a restart`,
+      );
+    }
   }
 
   get operatorRegistry(): OperatorRegistry {
@@ -87,6 +99,28 @@ export class RunManager {
     if (engine && engine.status === "running") engine.stop();
     this.engines.delete(id);
     return this.store.deleteRun(id);
+  }
+
+  /**
+   * Halt every live engine and flush buffered stats. Call before closing the
+   * store: engines tick on setImmediate and will happily keep writing to a
+   * closed database otherwise, throwing from a timer with no request to
+   * attribute it to.
+   *
+   * Engines are paused rather than stopped on purpose. Pausing halts the loop
+   * without emitting 'finished', so the rows stay non-terminal and the next
+   * process reconciles them as interrupted — which is what they are. Stopping
+   * them here would persist "stopped by user", which nobody did.
+   */
+  shutdown(): void {
+    for (const engine of this.engines.values()) {
+      if (engine.status === "running") engine.pause();
+    }
+    for (const [id, buf] of this.pendingStats) {
+      if (buf.length > 0) this.store.writeGenerations(id, buf);
+    }
+    this.pendingStats.clear();
+    this.engines.clear();
   }
 
   // ---------- subscriptions ----------
@@ -142,7 +176,12 @@ export class RunManager {
         this.store.writeGenerations(id, buf);
         this.pendingStats.delete(id);
       }
-      this.store.markFinished(id, finalBest);
+      // The engine emits 'finished' for a user-initiated stop too, having
+      // already set its own status to 'stopped'. Persisting 'finished'
+      // unconditionally made a stopped run read as completed as soon as the
+      // engine was gone and the live-status overlay stopped covering for it.
+      const terminal = engine.status === "stopped" ? "stopped" : "finished";
+      this.store.markTerminal(id, terminal, finalBest, reason);
       this.broadcast(id, {
         type: "finished",
         runId: id,
