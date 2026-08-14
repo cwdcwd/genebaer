@@ -85,12 +85,20 @@ export default function NewExperimentPage() {
     return map;
   }, [operators]);
 
-  const problems = byKind.get("problem") ?? [];
-  const encodings = byKind.get("encoding") ?? [];
-  const selections = byKind.get("selection") ?? [];
-  const crossovers = byKind.get("crossover") ?? [];
-  const mutations = byKind.get("mutation") ?? [];
-  const terminationOps = byKind.get("termination") ?? [];
+  // Grouped into one memo: a bare `?? []` in the component body allocates a
+  // fresh array every render, which churns every useMemo/useEffect below that
+  // depends on these lists.
+  const { problems, encodings, selections, crossovers, mutations, terminationOps } = useMemo(
+    () => ({
+      problems: byKind.get("problem") ?? [],
+      encodings: byKind.get("encoding") ?? [],
+      selections: byKind.get("selection") ?? [],
+      crossovers: byKind.get("crossover") ?? [],
+      mutations: byKind.get("mutation") ?? [],
+      terminationOps: byKind.get("termination") ?? [],
+    }),
+    [byKind],
+  );
 
   const problemMeta = problem ? metaById.get(`problem:${problem.id}`) : undefined;
   const encodingMeta = encoding ? metaById.get(`encoding:${encoding.id}`) : undefined;

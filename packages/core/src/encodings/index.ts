@@ -1,4 +1,3 @@
-import type { RandomSource } from "../random.js";
 import { Encoding } from "../encoding.js";
 
 export const ALL_ENCODINGS = [BinaryEncodingRef, NumericRef, StringRef] as const;
