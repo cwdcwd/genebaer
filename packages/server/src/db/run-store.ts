@@ -80,13 +80,13 @@ export class RunStore {
   }
 
   private readonly insertRunStmt = () =>
-    this!.db.prepare(`
+    this.db.prepare(`
       INSERT INTO runs (id, config_json, status, created_at, current_generation)
       VALUES (?, ?, ?, ?, 0)
     `);
 
   private readonly insertGenStmt = () =>
-    this!.db.prepare(`
+    this.db.prepare(`
       INSERT OR REPLACE INTO generations
         (run_id, generation, best, mean, median, worst, std_dev, diversity, best_genome_json, elapsed_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

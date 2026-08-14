@@ -30,7 +30,8 @@ function CompareInner({ ids }: { ids: string[] }) {
   const [errors, setErrors] = useState<string[]>([]);
 
   useEffect(() => {
-    Promise.all(
+    // Fire-and-forget: every rejection is already handled per-id below.
+    void Promise.all(
       ids.map((id) =>
         api.getRun(id).catch((err) => {
           setErrors((prev) => [...prev, `${id}: ${(err as Error).message}`]);
@@ -146,7 +147,7 @@ function CompareInner({ ids }: { ids: string[] }) {
             <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => {
               const idx = Number(String(v).replace("run", ""));
               const run = runs[idx];
-              return run ? runLabel(run) : v;
+              return run ? runLabel(run) : String(v);
             }} />
             {runs.map((run, i) => (
               <Line
