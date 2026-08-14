@@ -1,0 +1,14 @@
+# The beads issue export is a DERIVED file: the Dolt DB in .beads/ is the source
+# of truth. Every bead rewrites it, so any two concurrent branches conflict here.
+#
+# Rather than hand-merging two snapshots of a database (the documented beads
+# anti-pattern), the `beads-export` driver regenerates the file from the DB.
+# The driver lives in .git/config, which git cannot share — run
+# `bash scripts/setup-git-merge-driver.sh` (or just `pnpm install`) to install it.
+#
+# If the driver is not installed, git falls back to a normal conflict and you
+# resolve it by hand with: bd export -o .beads/issues.jsonl
+.beads/issues.jsonl merge=beads-export
+
+# Generated / vendored files: keep them out of diffs and language stats.
+pnpm-lock.yaml -diff linguist-generated
