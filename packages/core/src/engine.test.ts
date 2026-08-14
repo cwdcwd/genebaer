@@ -157,7 +157,9 @@ describe("crossover operators", () => {
 
   it("one-point preserves length and combines parents", () => {
     const cx = new OnePointCrossover();
-    const [c1, c2] = cx.crossover([0, 0, 0, 0], [1, 1, 1, 1], rng) as number[][];
+    // Tuple, not number[][]: crossover returns exactly two children, and under
+    // noUncheckedIndexedAccess an array type would make each `number[] | undefined`.
+    const [c1, c2] = cx.crossover([0, 0, 0, 0], [1, 1, 1, 1], rng) as [number[], number[]];
     expect(c1).toHaveLength(4);
     expect(c2).toHaveLength(4);
     for (const v of [...c1, ...c2]) expect([0, 1]).toContain(v);

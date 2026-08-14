@@ -67,10 +67,15 @@ All four are real and cover all four packages. This matters more than usual here
 
 | Gate | Command | Coverage |
 | --- | --- | --- |
-| Typecheck | `pnpm typecheck` | 4 packages, `tsc --noEmit` |
+| Typecheck | `pnpm typecheck` | 4 packages, `tsc --noEmit`, **including test files** |
 | Test | `pnpm test` | 99 tests |
-| Lint | `pnpm lint` | ESLint flat config, `--max-warnings=0` |
-| Build | `pnpm build` | `tsc` + `next build` |
+| Lint | `pnpm lint` | ESLint flat config, type-aware, `--max-warnings=0` |
+| Build | `pnpm build` | `tsc -p tsconfig.build.json` + `next build` |
+
+Turbo caches these. Note that `turbo.json` declares explicit `$TURBO_ROOT$`
+inputs for the root-level configs — without them, editing `eslint.config.mjs` or
+`tsconfig.base.json` does **not** invalidate the cache and a gate will replay a
+stale green result. Add any new shared root config to the relevant task's inputs.
 
 Testing runs in **two different modes**, which trips people up:
 
@@ -80,6 +85,18 @@ Testing runs in **two different modes**, which trips people up:
 `apps/web/vitest.config.ts` deliberately omits `@vitejs/plugin-react`; its Vite-internal imports don't match the Vite that vitest resolves. esbuild's `jsx: "automatic"` covers what the tests need.
 
 ### TypeScript configuration
+
+Each package carries **two** configs, and the split is deliberate:
+
+- `tsconfig.json` — **includes test files.** This is what `pnpm typecheck`, the
+  IDE, and typescript-eslint's project service resolve, so tests are type-checked
+  and type-aware lint rules apply to them.
+- `tsconfig.build.json` (`core`, `server`) — extends the above and excludes
+  `src/**/*.test.ts`, so tests are never emitted into `dist`.
+
+Getting this backwards is how test files end up unchecked: if `tsconfig.json`
+excludes them, they vanish from `typecheck` *and* from the lint project service
+at the same time, and nothing reports a gap.
 
 `tsconfig.base.json` is strict in ways that shape the code you'll write:
 

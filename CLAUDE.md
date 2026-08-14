@@ -239,7 +239,9 @@ pnpm dev         # turbo run dev: server + web visualizer
 
 **Linting.** One flat config at the repo root (`eslint.config.mjs`); each package
 runs `eslint . --config ../../eslint.config.mjs --max-warnings=0`, so config
-patterns must stay relative. Type-aware rules are not enabled yet (genebaer-bum).
+patterns must stay relative. **Type-aware rules are enabled** via
+`projectService`, so lint resolves real types — which also means a package whose
+tsconfig cannot see a file gets no type-aware linting on it.
 
 **Testing.** vitest everywhere, but two different modes:
 
@@ -253,6 +255,13 @@ patterns must stay relative. Type-aware rules are not enabled yet (genebaer-bum)
 
 When adding a package, add its test script in the matching mode. A package with
 no suite is a hole in the gate, not a package that "passes".
+
+**Two tsconfigs per package, and the split matters.** `tsconfig.json` *includes*
+test files — it is what `typecheck`, the IDE, and eslint's project service read.
+`tsconfig.build.json` (in `core` and `server`) excludes them so tests are not
+emitted into `dist`. Never exclude tests from `tsconfig.json` to keep them out of
+a build: that silently drops them from the typecheck gate and from type-aware
+linting at the same time, which is precisely what genebaer-uyf fixed.
 
 ## Architecture Overview
 

@@ -1,0 +1,5 @@
+{
+  "//": "Build-only config. tsconfig.json intentionally INCLUDES test files so that typecheck, eslint's project service, and the IDE all see them; this one excludes them so they are not emitted into dist.",
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts"]
+}
