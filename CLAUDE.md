@@ -43,16 +43,29 @@ git switch -c bead/<id>                   # never work on master
 # ...implement...
 pnpm typecheck && pnpm test && pnpm lint  # gates must pass; do not proceed on red
 bd close <id>                             # BEFORE committing — see note
+bd export -o .beads/issues.jsonl          # force a synchronous export — see note
 git add -A && git commit -m "<summary> (<id>)"
 git push -u origin HEAD
 gh pr create --title "<summary> (<id>)" --body "Closes <id>. <what changed, gate results>"
 git switch master                         # leave the tree clean for the next iteration
 ```
 
-**Close the bead before committing.** `bd close` re-exports `.beads/issues.jsonl`,
-which is a tracked file. Closing after the commit dirties the working tree and
-blocks the switch back to `master`, stranding the loop. Closing first lets the
-export ride along in the same commit.
+**Close the bead, force the export, then commit.** `.beads/issues.jsonl` is a
+tracked file written by beads itself, and `export.auto = true` flushes it on a
+**60s debounce** — not synchronously with `bd close`. That race has two distinct
+symptoms, and both have bitten this repo:
+
+1. `git add` immediately after `bd close` stages the *stale* JSONL, committing
+   issue state that reads `in_progress` for work that is actually closed.
+2. The debounce then fires after the commit, dirtying the tree and aborting
+   `git switch master` — stranding the iteration.
+
+`bd export -o .beads/issues.jsonl` writes synchronously and closes the race.
+Never rely on the auto-export having run.
+
+`bd export` excludes `bd remember` memories by default. Keep it that way: this
+repo is PUBLIC and memories may carry agent context that should not be
+published. Do not add `--include-memories`.
 
 **Gate honesty is the core discipline of this experiment.** Never report a gate
 as passing that did not execute. If a gate is a no-op, say so and file a bead.
