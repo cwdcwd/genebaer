@@ -3,10 +3,16 @@
 # Installs the `beads-export` git merge driver into this clone's .git/config.
 #
 # .gitattributes maps .beads/issues.jsonl to merge=beads-export, but the driver
-# definition itself lives in .git/config, which git cannot distribute. Every
-# clone and every worktree host must run this once. It is idempotent and safe to
-# re-run, and it is wired into the root `prepare` script so `pnpm install` does
-# it for you.
+# definition itself lives in .git/config, which git cannot distribute.
+#
+# Run it once per CLONE. Worktrees share the clone's .git/config, so they
+# inherit the driver automatically — no need to re-run per worktree. It is
+# idempotent and safe to re-run.
+#
+# It is also wired into the root `prepare` script, but do not rely on that
+# alone: pnpm skips lifecycle scripts when the install is already up to date, so
+# `pnpm install` only installs the driver on a genuinely fresh checkout. Run
+# `pnpm setup:git` when you need certainty.
 #
 # Why a driver at all: the JSONL is a derived export of the Dolt DB in .beads/.
 # Every bead rewrites the whole file, so two concurrent branches always conflict

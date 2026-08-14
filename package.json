@@ -13,7 +13,8 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "prepare": "bash scripts/setup-git-merge-driver.sh || true"
+    "prepare": "bash scripts/setup-git-merge-driver.sh || true",
+    "setup:git": "bash scripts/setup-git-merge-driver.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
