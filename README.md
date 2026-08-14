@@ -29,6 +29,11 @@ Open http://localhost:3000 → **New experiment** → pick a problem (e.g. OneMa
 
 ## Architecture
 
+> For the full treatment — repo layout and dependency rules, the run lifecycle,
+> the WebSocket protocol, how to add an operator, and the known sharp edges —
+> see **[docs/architecture.md](docs/architecture.md)**. The summary below is the
+> orientation version.
+
 ### `@genebaer/core` — engine, zero I/O deps
 
 Every GA aspect is an abstract base class with a static `operatorId` + JSON Schema `paramsSchema`. Concrete operators are registered in an `OperatorRegistry` keyed by `(kind, id)`:
