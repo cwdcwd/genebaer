@@ -97,14 +97,25 @@ export default tseslint.config(
     },
   },
 
-  // Test files lean on fixtures and deliberate edge cases.
-  //
-  // Type-aware rules are disabled here because core's and server's tsconfigs
-  // deliberately `exclude` test files from the build, so the project service
-  // has no type information for them. See genebaer-uyf: that exclusion also
-  // means `pnpm typecheck` does not cover test files at all.
+  // Test files lean on fixtures and deliberate edge cases. Type-aware rules DO
+  // apply here — every package's tsconfig.json now includes test files (the
+  // build uses a separate tsconfig.build.json), so the project service can
+  // resolve them.
   {
-    files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}', '**/*.test-d.ts'],
+    files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      // Tests assert on DOM nodes and fixtures whose static types are wider
+      // than what the test constructed, so narrowing casts are the norm.
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+    },
+  },
+
+  // Type-level tests are checked by `vitest --typecheck`, and their whole point
+  // is deliberate type violations behind @ts-expect-error. Linting them with
+  // type-aware rules reports those intentional errors as defects.
+  {
+    files: ['**/*.test-d.ts'],
     ...tseslint.configs.disableTypeChecked,
     rules: {
       ...tseslint.configs.disableTypeChecked.rules,

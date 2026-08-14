@@ -159,14 +159,14 @@ describe("genebaer server", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "step" }),
     });
-    expect((await stepRes.json()).status).toBe("paused");
+    expect(((await stepRes.json()) as { status: string }).status).toBe("paused");
 
     const stopRes = await fetch(`${baseUrl}/api/runs/${runId}/control`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "stop" }),
     });
-    expect((await stopRes.json()).status).toBe("stopped");
+    expect(((await stopRes.json()) as { status: string }).status).toBe("stopped");
 
     const detailRes = await fetch(`${baseUrl}/api/runs/${runId}`);
     const detail = (await detailRes.json()) as { status: string };
