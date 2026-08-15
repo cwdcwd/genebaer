@@ -13,6 +13,7 @@ import {
 import type { RunStore } from "./db/run-store.js";
 import { QueuedEvaluator } from "./eval/queued-evaluator.js";
 import type { WorkerRegistry } from "./eval/worker-registry.js";
+import type { CaptionQueue } from "./eval/caption-queue.js";
 
 /**
  * Owns all live runs. Each run gets a GeneticAlgorithmEngine wired to:
@@ -38,6 +39,9 @@ export class RunManager {
   private readonly pausedForWorker = new Set<string>();
   /** Event unsubscribers per run, so a discarded engine stops touching state. */
   private readonly enginePorts = new Map<string, (() => void)[]>();
+  /** Caption cadence per run, from the problem params. */
+  private readonly captionIntervals = new Map<string, number>();
+  private captionQueue: CaptionQueue | null = null;
   private readonly FLUSH_EVERY = 10;
 
   constructor(store: RunStore, registry?: OperatorRegistry) {
@@ -68,6 +72,7 @@ export class RunManager {
     const engine = new GeneticAlgorithmEngine(config, this.registry);
     this.engines.set(id, engine);
     this.recordRequirement(id, config);
+    this.recordCaptionInterval(id, config);
     this.store.createRun(id, config);
     this.wireEngine(id, engine);
     return id;
@@ -114,6 +119,7 @@ export class RunManager {
     this.enginePorts.delete(id);
     this.engines.delete(id);
     this.requirements.delete(id);
+    this.captionIntervals.delete(id);
     this.pausedForWorker.delete(id);
     return this.store.deleteRun(id);
   }
@@ -158,6 +164,50 @@ export class RunManager {
   /** Whether a run is currently paused solely for lack of a capable worker. */
   isPausedForWorker(runId: string): boolean {
     return this.pausedForWorker.has(runId);
+  }
+
+  /**
+   * Ask for a caption of the best genome, occasionally.
+   *
+   * A CLIP cosine similarity is a number with no human meaning — 0.19 tells
+   * you nothing about whether a run is going anywhere. A caption every N
+   * generations does.
+   *
+   * Best genome ONLY, and at most every N generations. Captioning per
+   * individual is precisely what makes a VLM unusable as the fitness signal:
+   * early noise images all caption identically, so the landscape is flat.
+   * Keeping it out of that path is the whole design.
+   */
+  private maybeRequestCaption(
+    runId: string,
+    engine: GeneticAlgorithmEngine<unknown>,
+    generation: number,
+  ): void {
+    const queue = this.captionQueue;
+    if (!queue) return;
+    const every = this.captionIntervals.get(runId);
+    if (!every || every <= 0) return;
+    if (generation % every !== 0) return;
+
+    // visualize() already renders the best genome for the canvas, so the
+    // caption path costs one render, not one per individual.
+    const frame = engine.visualFrame();
+    if (!frame) return;
+    queue.request(runId, generation, frame.data);
+  }
+
+  /** Attach a caption queue and start relaying its results to subscribers. */
+  attachCaptionQueue(queue: CaptionQueue): () => void {
+    this.captionQueue = queue;
+    return queue.onResult(({ runId, generation, caption }) => {
+      this.broadcast(runId, {
+        type: "annotation",
+        runId,
+        generation,
+        kind: "caption",
+        text: caption,
+      });
+    });
   }
 
   /**
@@ -228,6 +278,7 @@ export class RunManager {
         this.pendingStats.set(id, buf);
       }
       this.broadcast(id, { type: "generation", runId: id, stats });
+      this.maybeRequestCaption(id, engine, stats.generation);
     }));
 
     offs.push(engine.on("best", (generation, genome, fitness) => {
@@ -284,6 +335,19 @@ export class RunManager {
         contract: instance.contract,
         version: instance.version,
       });
+    }
+  }
+
+  /**
+   * How often to caption, from the problem params.
+   *
+   * Read from the PROBLEM rather than a server setting so it appears in the
+   * auto-generated experiment form like every other knob.
+   */
+  private recordCaptionInterval(id: string, config: RunConfig): void {
+    const raw = config.problem.params?.["captionEvery"];
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      this.captionIntervals.set(id, Math.floor(raw));
     }
   }
 

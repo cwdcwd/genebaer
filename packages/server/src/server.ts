@@ -18,6 +18,7 @@ import { setActiveQueue } from "./eval/queued-evaluator.js";
 import { WorkerRegistry } from "./eval/worker-registry.js";
 import { registerWorkerRoutes } from "./eval/worker-routes.js";
 import { SqliteScoreCache, setActiveScoreCache } from "./eval/score-cache.js";
+import { CaptionQueue } from "./eval/caption-queue.js";
 import { ImagePrompt, encodePng } from "@genebaer/vision";
 import { RunStore } from "./db/run-store.js";
 
@@ -66,6 +67,7 @@ export interface GenebaerServer {
   jobQueue: JobQueue;
   workerRegistry: WorkerRegistry;
   scoreCache: SqliteScoreCache;
+  captionQueue: CaptionQueue;
   listen: FastifyInstance["listen"];
   close: FastifyInstance["close"];
 }
@@ -81,6 +83,8 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   // Shares the store connection: RunStore opens SQLite with
   // locking_mode = EXCLUSIVE, so a second connection would fight it.
   const scoreCache = new SqliteScoreCache(store.database);
+  const captionQueue = new CaptionQueue();
+  const detachCaptions = runManager.attachCaptionQueue(captionQueue);
   setActiveQueue(jobQueue);
   setActiveScoreCache(scoreCache);
 
@@ -221,6 +225,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   registerWorkerRoutes(app, {
     queue: jobQueue,
     registry: workerRegistry,
+    captions: captionQueue,
     ...(opts.leaseMs === undefined ? {} : { leaseMs: opts.leaseMs }),
   });
 
@@ -271,6 +276,8 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   app.addHook("onClose", async () => {
     // Order matters: halt the engines before closing the database they write to.
     clearInterval(supervisor);
+    detachCaptions();
+    captionQueue.clear();
     runManager.shutdown();
     jobQueue.cancelAll("Server is shutting down");
     setActiveQueue(null);
@@ -285,6 +292,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     jobQueue,
     workerRegistry,
     scoreCache,
+    captionQueue,
     listen: app.listen.bind(app),
     close: app.close.bind(app),
   };
