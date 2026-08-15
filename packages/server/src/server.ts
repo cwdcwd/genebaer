@@ -13,6 +13,8 @@ import type {
 } from "@genebaer/shared-types";
 import type { OperatorRegistry } from "@genebaer/core";
 import { RunManager, RunNotFoundError } from "./run-manager.js";
+import { JobQueue } from "./eval/job-queue.js";
+import { setActiveQueue } from "./eval/queued-evaluator.js";
 import { RunStore } from "./db/run-store.js";
 
 const runConfigSchema = z.object({
@@ -51,6 +53,7 @@ export interface GenebaerServer {
   app: FastifyInstance;
   runManager: RunManager;
   store: RunStore;
+  jobQueue: JobQueue;
   listen: FastifyInstance["listen"];
   close: FastifyInstance["close"];
 }
@@ -59,6 +62,10 @@ export interface GenebaerServer {
 export function createServer(opts: ServerOptions = {}): GenebaerServer {
   const store = new RunStore(opts.dbPath ?? "./data/genebaer.db");
   const runManager = new RunManager(store, opts.registry);
+  // Queued evaluators resolve their queue from module scope, because the
+  // registry constructs operators with params only and cannot inject services.
+  const jobQueue = new JobQueue();
+  setActiveQueue(jobQueue);
 
   const app = Fastify({ logger: opts.logger ?? false });
 
@@ -175,6 +182,8 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   app.addHook("onClose", async () => {
     // Order matters: halt the engines before closing the database they write to.
     runManager.shutdown();
+    jobQueue.cancelAll("Server is shutting down");
+    setActiveQueue(null);
     store.close();
   });
 
@@ -182,6 +191,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     app,
     runManager,
     store,
+    jobQueue,
     listen: app.listen.bind(app),
     close: app.close.bind(app),
   };
