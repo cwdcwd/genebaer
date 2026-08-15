@@ -10,7 +10,7 @@ Every claim here was verified against source at the time of writing. Where the c
 
 ## Part 1 — Repository Architecture
 
-### The four packages
+### The five packages
 
 A pnpm workspace driven by turbo. Node >= 20, pnpm 11.9.0.
 
@@ -18,7 +18,8 @@ A pnpm workspace driven by turbo. Node >= 20, pnpm 11.9.0.
 | --- | --- | --- |
 | `packages/shared-types` | The type contract. Pure declarations, zero runtime code. | Types only |
 | `packages/core` | The GA engine and every operator. | **No** |
-| `packages/server` | Fastify HTTP + WebSocket host, SQLite persistence. | No |
+| `packages/server` | Fastify HTTP + WebSocket host, SQLite persistence, job queue and worker registry. | No |
+| `packages/vision` | Image genome, the image problem, and PNG encoding. | No |
 | `apps/web` | Next.js visualizer. | Yes |
 
 ### Dependency direction
@@ -29,16 +30,20 @@ graph TD
     CORE["core<br/><i>the GA engine</i>"]
     SRV["server<br/><i>Fastify + SQLite</i>"]
     WEB["web<br/><i>Next.js</i>"]
+    VIS["vision<br/><i>image genome + PNG</i>"]
 
     CORE --> ST
     SRV --> CORE
     SRV --> ST
+    SRV --> VIS
+    VIS --> CORE
     WEB --> ST
 
     style ST fill:#2d3748,stroke:#63b3ed,color:#fff
     style CORE fill:#2d3748,stroke:#68d391,color:#fff
     style SRV fill:#2d3748,stroke:#f6ad55,color:#fff
     style WEB fill:#2d3748,stroke:#fc8181,color:#fff
+    style VIS fill:#2d3748,stroke:#b794f4,color:#fff
 ```
 
 Two rules follow from this graph, and both are load-bearing:
@@ -63,12 +68,12 @@ Two rules follow from this graph, and both are load-bearing:
 
 ### Quality gates
 
-All four are real and cover all four packages. This matters more than usual here — see the loop protocol in `CLAUDE.md` — so the state of each is documented rather than assumed:
+All four gates are real and cover all five packages. This matters more than usual here — see the loop protocol in `CLAUDE.md` — so the state of each is documented rather than assumed:
 
 | Gate | Command | Coverage |
 | --- | --- | --- |
-| Typecheck | `pnpm typecheck` | 4 packages, `tsc --noEmit`, **including test files** |
-| Test | `pnpm test` | 103 tests |
+| Typecheck | `pnpm typecheck` | 5 packages, `tsc --noEmit`, **including test files** |
+| Test | `pnpm test` | 292 tests |
 | Lint | `pnpm lint` | ESLint flat config, type-aware, `--max-warnings=0` |
 | Build | `pnpm build` | `tsc -p tsconfig.build.json` + `next build` |
 
@@ -79,7 +84,7 @@ stale green result. Add any new shared root config to the relevant task's inputs
 
 Testing runs in **two different modes**, which trips people up:
 
-- `core`, `server`, `web` — ordinary vitest. `web` runs under jsdom with Testing Library.
+- `core`, `server`, `vision`, `web` — ordinary vitest. `web` runs under jsdom with Testing Library.
 - `shared-types` — **type-level only** (`*.test-d.ts` via `vitest run --typecheck`). The package emits no runtime code, so a runtime test there would assert nothing. These tests guard the wire contract that would otherwise break silently.
 
 `apps/web/vitest.config.ts` deliberately omits `@vitejs/plugin-react`; its Vite-internal imports don't match the Vite that vitest resolves. esbuild's `jsx: "automatic"` covers what the tests need.
@@ -91,7 +96,7 @@ Each package carries **two** configs, and the split is deliberate:
 - `tsconfig.json` — **includes test files.** This is what `pnpm typecheck`, the
   IDE, and typescript-eslint's project service resolve, so tests are type-checked
   and type-aware lint rules apply to them.
-- `tsconfig.build.json` (`core`, `server`) — extends the above and excludes
+- `tsconfig.build.json` (`core`, `server`, `vision`) — extends the above and excludes
   `src/**/*.test.ts`, so tests are never emitted into `dist`.
 
 Getting this backwards is how test files end up unchecked: if `tsconfig.json`
@@ -175,8 +180,82 @@ Scores are assigned **positionally**, so an evaluator must return exactly one
 score per genome in input order. The engine rejects a length mismatch rather
 than pairing genomes with the wrong scores silently.
 
-> Only the `local` evaluator exists today. The distributed machinery — job
-> queue, worker protocol, leases — is tracked under genebaer-pyg.
+### Distributed evaluation
+
+`local` scores in-process. Everything else goes through a **job queue** served
+by workers, and this is the part worth understanding before changing anything
+in `packages/server/src/eval/`.
+
+**Contract vs. capability.** A `RunConfig` names a scoring *contract* —
+`clip-similarity@clip-vit-base-patch32.1` — and the worker registry decides
+which connected workers satisfy it. Nothing in a run ever names a machine. That
+is what makes a worker thread and a browser tab interchangeable rather than two
+different architectures, and it is why "should this run on the server or in the
+browser?" is a deployment question here, not a design one.
+
+**Version is part of the match.** Scores from two model versions are not
+comparable, so a v1 worker is never handed a v2 job, and the score cache keys on
+the version too. Getting this wrong would distort a run's fitness landscape
+mid-flight with no error anywhere.
+
+#### The job lifecycle
+
+```mermaid
+sequenceDiagram
+    participant E as engine
+    participant Q as JobQueue
+    participant W as worker
+
+    E->>Q: submit(population)
+    Note over Q: one job per genome
+    W->>Q: claim(capabilities, max)
+    Q-->>W: lease + jobs (expires at T)
+    W->>Q: heartbeat (extends lease)
+    W->>Q: score(index, value)
+    Note over Q: assembled POSITIONALLY
+    Q-->>E: all N scores → generation proceeds
+```
+
+**Leases are mandatory, not a refinement.** The engine is generational, so it
+waits for *every* score. A worker that claims jobs and vanishes — a closed tab,
+a killed thread, a shut laptop — would otherwise hold the barrier open forever.
+On expiry, only the *unscored* jobs are re-dispatched.
+
+A late score from an expired lease **is** accepted when nobody else scored that
+job, because the work is perfectly good and discarding it wastes an inference —
+but it never overwrites a score another worker already recorded.
+
+#### The straggler consequence
+
+The generational barrier means a generation finishes at the pace of the
+**slowest claim**. That is the price of keeping selection consistent, and it is
+why `GET /api/eval/stats` names blockers explicitly: which evaluation, how many
+jobs remain, which workers hold them, and whether anything can serve the
+contract at all. Every failure mode here looks identical from outside — the run
+simply stops advancing — so that endpoint is the difference between diagnosing
+and guessing.
+
+#### Workers
+
+| Kind | Transport | Notes |
+| --- | --- | --- |
+| Worker thread | in-process | `WorkerPool`; scoring never runs on the main thread, which would starve the engine's `setImmediate` loop |
+| Browser tab | `/ws/worker` | Same protocol; closing a tab returns its jobs immediately |
+| Anything else | `POST /api/workers/*` | Same protocol over HTTP |
+
+The thread entry point and its scorers are plain `.mjs`, because a
+`worker_thread` needs a real file at runtime. `tsc` does not copy files it does
+not compile, so the server build has an explicit copy step — without it the pool
+works in dev and tests and fails only in a built server.
+
+#### Captions are not fitness
+
+A separate `CaptionQueue` and a separate `annotation` WS message, deliberately.
+A caption is text for a human — "is this run going anywhere?" — and keeping it
+off the scoring path makes that structural rather than a convention. It runs on
+the best genome only, every N generations, and is entirely best-effort: stale
+requests are dropped, never re-dispatched, and a run completes normally with
+captioning dead.
 
 **`Encoding<G>` is the type anchor.** It defines what a genome *is* for a run; every other operator is generic over the same `G`. Compatibility is advertised via a static `compatibleEncodings` array, which the registry surfaces as metadata and the UI uses to filter incompatible choices out of the form.
 
@@ -249,15 +328,27 @@ Two details that surprise people:
 
 **Termination sees the current generation.** `check(history)` is called after the new stats are pushed, so `MaxGenerations(1)` stops after one generation, not two.
 
-**Diversity is sampled, not exhaustive.** `computeDiversity()` shuffles the population and takes up to 50 individuals, making it O(50²) rather than O(n²). It is an estimate — a real one, but don't read it as exact for large populations.
+**Diversity is sampled, and the sample ADAPTS to genome size.** `computeDiversity()` shuffles the population and compares pairs, but the sample shrinks as genomes grow so total element comparisons stay under a fixed budget. At 50 individuals and a 98,304-bit image genome the exact metric would be ~120 million comparisons every generation — dominating a loop it only exists to describe. It is an estimate, a real one, and `diversitySampleSize()` is exported so the policy can be asserted directly rather than inferred from a stopwatch.
 
 Parent count is rounded up to even (`needed % 2 === 0 ? needed : needed + 1`) because crossover produces children in pairs; the extra child is discarded when `needed` is odd.
 
 ### Determinism
 
-`SeededRandomSource` is mulberry32 — seeded, fast, and bit-for-bit reproducible across platforms. **Same seed + same config ⇒ identical run.**
+`SeededRandomSource` is mulberry32 — seeded, fast, and bit-for-bit reproducible across platforms. Same seed + same config ⇒ identical run, **provided the evaluator is deterministic**.
 
-This holds only as long as every operator draws randomness exclusively from the injected `RandomSource`. An operator calling `Math.random()` directly breaks reproducibility for the whole system, and no test will catch it. This is the single easiest way to do real damage here.
+That proviso is not decoration. It holds unconditionally for `local` and for any evaluator that is pure arithmetic. It does **not** hold for a model-backed evaluator: GPU float non-determinism, batching effects and model-version drift all mean two runs of the same config can produce different numbers.
+
+What restores it is the **score cache**. Keyed on genome + evaluator identity + params, a replay of a completed run hits cache for every genome and reproduces its fitness values exactly, with zero inference. So:
+
+| Situation | Reproducible? |
+| --- | --- |
+| `local` evaluator, same seed | Yes, unconditionally |
+| Model-backed, first run | No |
+| Model-backed, replay with a warm cache | Yes, exactly |
+
+Being precise about which of these you are in matters when comparing two runs: a difference you attribute to a config change may just be the model.
+
+This all holds only as long as every operator draws randomness exclusively from the injected `RandomSource`. An operator calling `Math.random()` directly breaks reproducibility for the whole system, and no test will catch it. This is the single easiest way to do real damage here.
 
 (An operator that draws *no* randomness is fine and not a bug — `ArithmeticCrossover` blends on a configured alpha and is deterministic by design, which is why its `rng` parameter is named `_rng`.)
 
@@ -374,6 +465,63 @@ export class MySelection extends SelectionOperator<unknown> {
 
 Omit `compatibleEncodings` (or leave it empty) to mean encoding-agnostic.
 
+## Adding an evaluator
+
+An evaluator answers *how and where* fitness is computed, not what it means.
+
+**In-process** — extend `FitnessEvaluator` and implement `evaluateBatch`. Suitable
+only for cheap, synchronous scoring; anything CPU-bound belongs on a thread.
+
+**Distributed** — extend `QueuedEvaluator` in `packages/server`. Supply identity
+and nothing else:
+
+```typescript
+export class MyScorer extends QueuedEvaluator {
+  static override readonly operatorId = "my-scorer";   // the CONTRACT
+  static override readonly version = "model-v3";       // bump on ANY change
+  static override readonly displayName = "My scorer";
+  static override readonly description = "One line, shown in the UI.";
+  static override readonly paramsSchema = {} as const;
+
+  // Optional: do work once on the server that every worker would repeat.
+  protected override prepare(genome: unknown): unknown { ... }
+
+  // Optional: scoring input that lives on the PROBLEM, not the evaluator.
+  // The score cache keys on whatever this returns.
+  protected override paramsForJob(ctx): Record<string, unknown> { ... }
+}
+```
+
+Three rules worth internalising:
+
+1. **Bump `version` whenever the meaning of the score changes** — a different
+   model, different preprocessing, different normalisation. Scores across
+   versions are not comparable, and the cache and the registry both key on it.
+2. **`paramsForJob` and the cache key must agree.** They do by construction
+   today; if you override one, you are changing the other.
+3. **Never invent a score on failure.** A stand-in metric looks like it is
+   working while steering a whole run at something unrelated, and no gate
+   catches it. Throw.
+
+## Adding a worker
+
+A worker is anything that can register a capability and answer with numbers.
+
+1. **Register** capabilities as `{ evaluatorId, version }` pairs — over HTTP
+   (`POST /api/workers/register`) or WS (`/ws/worker`).
+2. **Claim** work; you receive a lease with an expiry and a batch of jobs.
+3. **Score** each job by index. Positional: the index is how the engine
+   reassembles the generation.
+4. **Heartbeat** on long batches. A `false`/`leaseLost` answer means your jobs
+   were re-dispatched — stop and claim again rather than finishing work someone
+   else now owns.
+5. **Fail loudly** if you cannot score at all, rather than going quiet, which
+   only costs the run a lease timeout.
+
+Thread-side scorers live in `packages/server/src/eval/scorers.mjs`, keyed by
+contract id. They are plain `.mjs` because a `worker_thread` loads a real file
+at runtime — add new ones there and the build copy step carries them across.
+
 The same shape applies to the other five kinds — different base class, different registry kind, same five steps.
 
 ---
@@ -387,3 +535,6 @@ Verified, current, and worth knowing before you debug them:
 3. **`mutationRate` semantics are operator-defined.** Per-gene for `BitFlipMutation`, but each operator interprets the rate itself. Read the operator before assuming.
 4. **`data/` is gitignored.** The SQLite DB is local-only; there is no shared run history.
 5. **`elitism` is validated in two places with different strictness.** zod accepts any non-negative integer; the engine additionally requires `elitism < populationSize` and throws `RangeError`, surfacing as a 422.
+6. **A queued evaluator needs a running server.** It resolves its queue from module scope, because the registry constructs operators with params only and cannot inject services. Using one outside a server rejects with a clear message rather than hanging.
+7. **A WS lease frame is large.** A population of 40 at 64x64 RGB encodes to ~1.97 MB of JSON, not the ~491 KB the raw pixel count suggests - JSON writes each byte as decimal text. `maxPayload` is 8 MB for this reason; at 128x128 a batch of 40 uses ~7.87 MB, so bigger runs must claim smaller batches.
+8. **Real model inference is not covered by the test suite.** CLIP scoring uses a swappable backend and the tests inject a fake, so the contract, caching and failure paths are covered but "the model produces a useful gradient" is not. Measured separately - see `docs/experiments/`.
