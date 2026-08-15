@@ -10,6 +10,7 @@
  */
 import { assertType, describe, expectTypeOf, it } from "vitest";
 import type {
+  EvalJobPayload,
   GenerationStats,
   JSONSchema,
   OperatorKind,
@@ -19,6 +20,9 @@ import type {
   RunDetail,
   RunStatus,
   RunSummary,
+  WorkerCapability,
+  WorkerClientMessage,
+  WorkerServerMessage,
   WsClientMessage,
   WsServerMessage,
 } from "./index.js";
@@ -192,5 +196,56 @@ describe("JSONSchema", () => {
     expectTypeOf<OperatorMeta["paramsSchema"]>().toEqualTypeOf<
       Record<string, JSONSchema>
     >();
+  });
+});
+
+describe("Worker protocol", () => {
+  it("discriminates worker-bound messages on `type`", () => {
+    expectTypeOf<WorkerServerMessage["type"]>().toEqualTypeOf<
+      "worker.registered" | "worker.lease" | "worker.idle" | "worker.leaseLost"
+    >();
+    expectTypeOf<WorkerClientMessage["type"]>().toEqualTypeOf<
+      | "worker.register"
+      | "worker.claim"
+      | "worker.score"
+      | "worker.heartbeat"
+      | "worker.fail"
+    >();
+  });
+
+  it("narrows a lease message to its jobs", () => {
+    const msg = {} as WorkerServerMessage;
+    if (msg.type === "worker.lease") {
+      expectTypeOf(msg.jobs).toEqualTypeOf<EvalJobPayload[]>();
+      expectTypeOf(msg.expiresAt).toEqualTypeOf<number>();
+    }
+  });
+
+  it("carries a version on every capability, since scores across versions are not comparable", () => {
+    expectTypeOf<WorkerCapability["version"]>().toEqualTypeOf<string>();
+    // @ts-expect-error a capability without a version is not a capability
+    assertType<WorkerCapability>({ evaluatorId: "clip-similarity" });
+  });
+
+  it("keeps a job's population index numeric so scores reassemble positionally", () => {
+    expectTypeOf<EvalJobPayload["index"]>().toEqualTypeOf<number>();
+    expectTypeOf<EvalJobPayload["genome"]>().toBeUnknown();
+  });
+
+  it("requires a leaseId on every submission, so an expired claim is detectable", () => {
+    assertType<WorkerClientMessage>({
+      type: "worker.score",
+      leaseId: "l1",
+      evaluationId: "e1",
+      index: 0,
+      score: 0.5,
+    });
+    // @ts-expect-error a score without its lease cannot be validated
+    assertType<WorkerClientMessage>({ type: "worker.score", evaluationId: "e1", index: 0, score: 1 });
+  });
+
+  it("does not let a worker masquerade as a run subscriber", () => {
+    // @ts-expect-error worker messages are a separate channel from run subscriptions
+    assertType<WsClientMessage>({ type: "worker.claim", max: 4 });
   });
 });

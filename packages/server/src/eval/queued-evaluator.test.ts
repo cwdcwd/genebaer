@@ -80,7 +80,7 @@ describe("QueuedEvaluator", () => {
     expect(stats.length).toBeGreaterThan(0);
     // one-max on an 8-bit genome: fitness is a bit count, so bounded by 8.
     expect(stats.every((f) => f >= 0 && f <= 8)).toBe(true);
-    expect(queue.stats()).toEqual({ pending: 0, openEvaluations: 0 });
+    expect(queue.stats()).toEqual({ pending: 0, openEvaluations: 0, activeLeases: 0, expiredLeases: 0 });
   });
 
   it("surfaces a failed evaluation as an engine error rather than hanging", async () => {
@@ -116,7 +116,7 @@ describe("QueuedEvaluator", () => {
       generation: 0,
     });
 
-    expect(queue.stats()).toEqual({ pending: 3, openEvaluations: 1 });
+    expect(queue.stats()).toEqual({ pending: 3, openEvaluations: 1, activeLeases: 0, expiredLeases: 0 });
     const jobs = queue.claim(["test-contract"], 10);
     expect(jobs.map((j) => j.index).sort()).toEqual([0, 1, 2]);
     for (const job of jobs) queue.submitScore(job.evaluationId, job.index, job.index);

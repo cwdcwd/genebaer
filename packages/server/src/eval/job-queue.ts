@@ -26,11 +26,27 @@ interface PendingEvaluation {
   settled: boolean;
 }
 
+/** Jobs handed to one worker, valid until `expiresAt`. */
+export interface Lease {
+  readonly leaseId: string;
+  readonly workerId: string;
+  readonly jobs: readonly EvalJob[];
+  expiresAt: number;
+}
+
 export interface QueueStats {
   /** Jobs waiting to be claimed. */
   readonly pending: number;
   /** Evaluations still waiting on at least one score. */
   readonly openEvaluations: number;
+  /** Leases currently held by workers. */
+  readonly activeLeases: number;
+  /** Times a lease expired and its jobs went back to the queue. */
+  readonly expiredLeases: number;
+}
+
+function jobKey(evaluationId: string, index: number): string {
+  return `${evaluationId}:${String(index)}`;
 }
 
 /**
@@ -49,6 +65,10 @@ export interface QueueStats {
 export class JobQueue {
   private readonly pending: EvalJob[] = [];
   private readonly evaluations = new Map<string, PendingEvaluation>();
+  private readonly leases = new Map<string, Lease>();
+  /** jobKey -> leaseId, so a submitted score can clear its lease entry. */
+  private readonly leaseByJob = new Map<string, string>();
+  private expiredLeaseCount = 0;
 
   /**
    * Enqueue a whole population and return a promise for its scores, in
@@ -109,6 +129,99 @@ export class JobQueue {
     return taken;
   }
 
+  /**
+   * Claim jobs under a lease.
+   *
+   * A lease is what stops one vanished worker from hanging a run forever.
+   * Because the engine is generational it waits for EVERY score, so a worker
+   * that claims jobs and then disappears — a closed tab, a killed thread, a
+   * shut laptop — would otherwise hold the barrier open indefinitely. On
+   * expiry the jobs go back to the queue for anyone else.
+   *
+   * Returns null when nothing matches, so callers can distinguish "no work"
+   * from "work handed over".
+   */
+  claimWithLease(
+    workerId: string,
+    capabilities: readonly string[],
+    max: number,
+    leaseMs: number,
+    now: number = Date.now(),
+  ): Lease | null {
+    const jobs = this.claim(capabilities, max);
+    if (jobs.length === 0) return null;
+    const lease: Lease = {
+      leaseId: randomUUID(),
+      workerId,
+      jobs,
+      expiresAt: now + leaseMs,
+    };
+    this.leases.set(lease.leaseId, lease);
+    for (const job of jobs) {
+      this.leaseByJob.set(jobKey(job.evaluationId, job.index), lease.leaseId);
+    }
+    return lease;
+  }
+
+  /**
+   * Extend a lease a worker is still actively working on.
+   *
+   * Returns false for an unknown or already-expired lease, which tells the
+   * worker its jobs have been re-dispatched and it should claim afresh rather
+   * than keep grinding on work someone else now owns.
+   */
+  heartbeat(leaseId: string, leaseMs: number, now: number = Date.now()): boolean {
+    const lease = this.leases.get(leaseId);
+    if (!lease) return false;
+    if (lease.expiresAt <= now) return false;
+    lease.expiresAt = now + leaseMs;
+    return true;
+  }
+
+  /**
+   * Return jobs from any lease that has run out of time.
+   *
+   * Only jobs still unscored are requeued: a worker may have submitted some of
+   * its batch before stalling, and re-scoring those would be wasted work.
+   */
+  expireLeases(now: number = Date.now()): number {
+    let expired = 0;
+    for (const [leaseId, lease] of [...this.leases]) {
+      if (lease.expiresAt > now) continue;
+      this.releaseLease(leaseId, true);
+      expired += 1;
+      this.expiredLeaseCount += 1;
+    }
+    return expired;
+  }
+
+  /** Drop a lease, optionally returning its unfinished jobs to the queue. */
+  releaseLease(leaseId: string, requeueOutstanding: boolean): void {
+    const lease = this.leases.get(leaseId);
+    if (!lease) return;
+    this.leases.delete(leaseId);
+    const outstanding: EvalJob[] = [];
+    for (const job of lease.jobs) {
+      const key = jobKey(job.evaluationId, job.index);
+      if (this.leaseByJob.get(key) === leaseId) {
+        this.leaseByJob.delete(key);
+        outstanding.push(job);
+      }
+    }
+    if (requeueOutstanding) this.requeue(outstanding);
+  }
+
+  /** Release every lease held by a worker, e.g. when it disconnects. */
+  releaseWorker(workerId: string): number {
+    let released = 0;
+    for (const [leaseId, lease] of [...this.leases]) {
+      if (lease.workerId !== workerId) continue;
+      this.releaseLease(leaseId, true);
+      released += 1;
+    }
+    return released;
+  }
+
   /** Put jobs back at the front, e.g. after a lease expired. */
   requeue(jobs: readonly EvalJob[]): void {
     for (const job of jobs) {
@@ -147,6 +260,9 @@ export class JobQueue {
 
     evaluation.scores[index] = score;
     evaluation.remaining -= 1;
+    // The job is done, so it is no longer outstanding on whatever lease held
+    // it. A later expiry of that lease must not requeue an already-scored job.
+    this.leaseByJob.delete(jobKey(evaluationId, index));
     if (evaluation.remaining === 0) {
       evaluation.settled = true;
       this.evaluations.delete(evaluationId);
@@ -178,7 +294,12 @@ export class JobQueue {
   }
 
   stats(): QueueStats {
-    return { pending: this.pending.length, openEvaluations: this.evaluations.size };
+    return {
+      pending: this.pending.length,
+      openEvaluations: this.evaluations.size,
+      activeLeases: this.leases.size,
+      expiredLeases: this.expiredLeaseCount,
+    };
   }
 
   private dropPendingFor(evaluationId: string): void {

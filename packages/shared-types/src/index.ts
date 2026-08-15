@@ -182,3 +182,54 @@ export type WsServerMessage =
 export type WsClientMessage =
   | { type: "subscribe"; runId: string }
   | { type: "unsubscribe"; runId: string };
+
+// ---------- Worker protocol ----------
+
+/**
+ * A scoring contract a worker can fulfil.
+ *
+ * The version is part of the identity, not decoration: scores from two model
+ * versions are not comparable, and mixing them inside one run would distort
+ * the fitness landscape mid-flight in a way no test would catch.
+ */
+export interface WorkerCapability {
+  /** Evaluator id, e.g. "clip-similarity". */
+  evaluatorId: string;
+  version: string;
+}
+
+/** One genome for a worker to score. */
+export interface EvalJobPayload {
+  evaluationId: string;
+  /** Population index. Scores are reassembled by this, never by arrival. */
+  index: number;
+  genome: unknown;
+  evaluatorId: string;
+  params: Record<string, unknown>;
+}
+
+/** Server → worker. */
+export type WorkerServerMessage =
+  | { type: "worker.registered"; workerId: string; leaseMs: number }
+  | {
+      type: "worker.lease";
+      leaseId: string;
+      expiresAt: number;
+      jobs: EvalJobPayload[];
+    }
+  /** No job currently matches this worker's capabilities. */
+  | { type: "worker.idle" }
+  /**
+   * The worker's lease is gone — expired, or released because it dropped off.
+   * Its jobs have been re-dispatched, so it must stop working and re-claim.
+   */
+  | { type: "worker.leaseLost"; leaseId: string; reason: string };
+
+/** Worker → server. */
+export type WorkerClientMessage =
+  | { type: "worker.register"; capabilities: WorkerCapability[] }
+  | { type: "worker.claim"; max: number }
+  | { type: "worker.score"; leaseId: string; evaluationId: string; index: number; score: number }
+  | { type: "worker.heartbeat"; leaseId: string }
+  /** This worker cannot score the job at all; fail the whole evaluation. */
+  | { type: "worker.fail"; leaseId: string; evaluationId: string; reason: string };

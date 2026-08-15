@@ -180,10 +180,10 @@ describe("JobQueue hostile submissions", () => {
 describe("JobQueue stats", () => {
   it("reports pending jobs and open evaluations", async () => {
     const q = new JobQueue();
-    expect(q.stats()).toEqual({ pending: 0, openEvaluations: 0 });
+    expect(q.stats()).toEqual({ pending: 0, openEvaluations: 0, activeLeases: 0, expiredLeases: 0 });
 
     const scores = q.submit("test", P, ["a", "b"]);
-    expect(q.stats()).toEqual({ pending: 2, openEvaluations: 1 });
+    expect(q.stats()).toEqual({ pending: 2, openEvaluations: 1, activeLeases: 0, expiredLeases: 0 });
 
     const jobs = q.claim(["test"], 1);
     expect(q.stats().pending).toBe(1);
@@ -191,6 +191,6 @@ describe("JobQueue stats", () => {
     q.submitScore(jobs[0]!.evaluationId, 0, 1);
     q.submitScore(jobs[0]!.evaluationId, 1, 2);
     await scores;
-    expect(q.stats()).toEqual({ pending: 0, openEvaluations: 0 });
+    expect(q.stats()).toEqual({ pending: 0, openEvaluations: 0, activeLeases: 0, expiredLeases: 0 });
   });
 });
