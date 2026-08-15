@@ -69,6 +69,9 @@ export {
 export { createDefaultRegistry } from "./defaults.js";
 export {
   GeneticAlgorithmEngine,
+  diversitySampleSize,
+  DIVERSITY_MAX_SAMPLE,
+  DIVERSITY_MIN_SAMPLE,
   type EngineEvents,
 } from "./engine.js";
 export {

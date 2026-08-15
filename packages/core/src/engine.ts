@@ -12,6 +12,36 @@ import type { CrossoverOperator } from "./operators/crossover/base.js";
 import type { MutationOperator } from "./operators/mutation/base.js";
 import type { TerminationCondition } from "./operators/termination/index.js";
 
+export const DIVERSITY_MAX_SAMPLE = 50;
+export const DIVERSITY_MIN_SAMPLE = 5;
+
+/**
+ * How many individuals to compare for the diversity statistic.
+ *
+ * Cost is O(pairs x genomeLength) and pairs grows quadratically, so a fixed
+ * sample makes the statistic explode as genomes grow: at 50 individuals and a
+ * 98,304-bit image genome it is ~120 million element comparisons EVERY
+ * generation. Diversity is diagnostic, not part of selection, so it must never
+ * dominate the loop it describes.
+ *
+ * Solves pairs(k) * genomeLength <= budget for k, where pairs(k) = k(k-1)/2,
+ * then clamps. Exported as a pure function so the policy can be asserted
+ * directly rather than inferred from a wall-clock measurement.
+ */
+export function diversitySampleSize(
+  populationSize: number,
+  genomeLength: number,
+  budget: number,
+): number {
+  const affordablePairs = budget / Math.max(1, genomeLength);
+  // k(k-1)/2 <= pairs  =>  k <= (1 + sqrt(1 + 8*pairs)) / 2
+  const k = Math.floor((1 + Math.sqrt(1 + 8 * affordablePairs)) / 2);
+  return Math.max(
+    DIVERSITY_MIN_SAMPLE,
+    Math.min(DIVERSITY_MAX_SAMPLE, Math.min(populationSize, k)),
+  );
+}
+
 export interface EngineEvents<G = unknown> {
   generation: (stats: GenerationStats) => void;
   best: (generation: number, genome: G, fitness: number) => void;
@@ -28,6 +58,13 @@ export interface EngineEvents<G = unknown> {
  * resolved by registry id from the config.
  */
 export class GeneticAlgorithmEngine<G = unknown> {
+  /**
+   * Ceiling on element comparisons spent on the diversity statistic per
+   * generation. Diversity is diagnostic, not part of selection, so it must
+   * never dominate the loop it is describing.
+   */
+  private static readonly DIVERSITY_BUDGET = 2_000_000;
+
   readonly config: RunConfig;
   readonly rng: RandomSource;
 
@@ -254,11 +291,28 @@ export class GeneticAlgorithmEngine<G = unknown> {
     this.fitnesses = this.population.map((g) => this.problem.evaluate(g));
   }
 
+  /**
+   * Mean pairwise distance across a sample of the population.
+   *
+   * The sample size adapts to genome length, because the cost is
+   * O(pairs x genomeLength) and pairs grows quadratically. At 50 individuals
+   * that is 1,225 pairs; on a 98,304-bit image genome the exact metric would
+   * be ~120 million element comparisons EVERY generation, dominating the loop
+   * entirely — and having nothing to do with fitness.
+   *
+   * Capping total element comparisons keeps the cost flat as genomes grow.
+   * Diversity was always an estimate over a shuffled sample; this makes the
+   * sample smaller for large genomes rather than making the metric wrong.
+   * Small genomes are unaffected and still use the full 50.
+   */
   private computeDiversity(): number {
     const n = this.population.length;
     if (n < 2) return 0;
-    // Sample up to 50 individuals for pairwise mean — O(50²) instead of O(n²).
-    const sample = this.rng.shuffle([...this.population]).slice(0, 50);
+
+    const sampleSize = this.diversitySampleSize(n);
+    if (sampleSize < 2) return 0;
+
+    const sample = this.rng.shuffle([...this.population]).slice(0, sampleSize);
     let sum = 0;
     let pairs = 0;
     for (let i = 0; i < sample.length; i++) {
@@ -268,6 +322,31 @@ export class GeneticAlgorithmEngine<G = unknown> {
       }
     }
     return pairs === 0 ? 0 : sum / pairs;
+  }
+
+  /**
+   * How many individuals to compare, given how big a genome is.
+   *
+   * Solves pairs(k) * genomeLength <= budget for k, where
+   * pairs(k) = k(k-1)/2, then clamps to [MIN, MAX].
+   */
+  private diversitySampleSize(populationSize: number): number {
+    const first = this.population[0];
+    if (first === undefined) return Math.min(populationSize, DIVERSITY_MAX_SAMPLE);
+
+    let genomeLength: number;
+    try {
+      genomeLength = Math.max(1, this.encoding.size(first));
+    } catch {
+      // An encoding that cannot size a genome gets the old behaviour rather
+      // than a crash inside a statistic.
+      return Math.min(populationSize, DIVERSITY_MAX_SAMPLE);
+    }
+    return diversitySampleSize(
+      populationSize,
+      genomeLength,
+      GeneticAlgorithmEngine.DIVERSITY_BUDGET,
+    );
   }
 
   private median(sorted: readonly number[]): number {
