@@ -40,4 +40,8 @@ random search on every prompt tested.
 evolved image scored **0.3449** against "a red circle on a white background";
 an actually-drawn red circle scored **0.2621**.
 
+`clip-natural-baseline.mjs` — the same conclusion against a real photograph,
+which is the fairer ceiling. GA-evolved noise **0.3189** vs a genuine cat photo
+**0.2370**, and **0.2122** for that photo resized to the GA resolution.
+
 Full write-up: [`../docs/experiments/clip-gradient.md`](../docs/experiments/clip-gradient.md).
