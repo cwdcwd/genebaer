@@ -17,6 +17,7 @@ import { JobQueue } from "./eval/job-queue.js";
 import { setActiveQueue } from "./eval/queued-evaluator.js";
 import { WorkerRegistry } from "./eval/worker-registry.js";
 import { registerWorkerRoutes } from "./eval/worker-routes.js";
+import { WorkerConnection, parseWorkerMessage } from "./eval/worker-socket.js";
 import { SqliteScoreCache, setActiveScoreCache } from "./eval/score-cache.js";
 import { ImagePrompt, encodePng } from "@genebaer/vision";
 import { RunStore } from "./db/run-store.js";
@@ -87,7 +88,18 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   const app = Fastify({ logger: opts.logger ?? false });
 
   app.register(cors, { origin: true });
-  app.register(websocket, { options: { maxPayload: 1 << 20 } });
+  // 8 MB, raised deliberately from 1 MB.
+  //
+  // A browser worker leasing a population of 40 at 64x64 RGB carries 40 x
+  // 12,288 bytes of pixels. That is ~491 KB raw, but JSON encodes each byte as
+  // decimal text ("200,"), which measures at ~1.97 MB - nearly double the old
+  // limit. The raw-bytes estimate was the trap; the test in
+  // worker-socket.test.ts asserts the real encoded size against this ceiling.
+  //
+  // 8 MB leaves headroom for a larger batch or resolution without silently
+  // dropping frames, which is how this would fail: the socket closes and the
+  // generation stalls with no obvious cause.
+  app.register(websocket, { options: { maxPayload: 8 << 20 } });
 
   // ---------- REST ----------
 
@@ -265,6 +277,36 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
       socket.on("close", () => {
         for (const unsub of unsubs.values()) unsub();
         unsubs.clear();
+      });
+    });
+  });
+
+  // Workers over WebSocket: same protocol as the HTTP transport, different
+  // bytes. A browser tab is an adapter here, not an architecture.
+  app.register(async function workerWs(fastify) {
+    fastify.get("/ws/worker", { websocket: true }, (socket: WebSocket) => {
+      const connection = new WorkerConnection(
+        (msg) => {
+          if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
+        },
+        {
+          queue: jobQueue,
+          registry: workerRegistry,
+          leaseMs: opts.leaseMs ?? 30_000,
+          kind: "browser",
+        },
+      );
+
+      socket.on("message", (raw: Buffer) => {
+        const msg = parseWorkerMessage(raw.toString());
+        if (msg) connection.handle(msg);
+      });
+
+      socket.on("close", () => {
+        // Closing a tab returns its jobs immediately rather than waiting out
+        // the lease.
+        connection.close();
+        runManager.superviseWorkerCapacity(workerRegistry);
       });
     });
   });
