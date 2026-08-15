@@ -53,6 +53,12 @@ export {
   FitnessProblem,
   type VisualFrame,
 } from "./operators/problem/base.js";
+
+export {
+  FitnessEvaluator,
+  type EvaluationContext,
+} from "./operators/evaluator/base.js";
+export { LocalEvaluator } from "./operators/evaluator/local.js";
 export { OneMax } from "./problems/one-max.js";
 export { Sphere, Rastrigin } from "./problems/functions.js";
 export { Weasel } from "./problems/weasel.js";

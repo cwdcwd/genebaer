@@ -27,6 +27,12 @@ const runConfigSchema = z.object({
   termination: z.array(
     z.object({ id: z.string(), params: z.record(z.unknown()).optional() }),
   ),
+  // Optional: absent means the in-process "local" evaluator. Required would
+  // reject every config persisted or saved as a preset before evaluators
+  // existed.
+  evaluator: z
+    .object({ id: z.string(), params: z.record(z.unknown()).optional() })
+    .optional(),
   seed: z.number().int(),
 });
 

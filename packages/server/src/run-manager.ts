@@ -78,7 +78,11 @@ export class RunManager {
         engine.resume();
         break;
       case "step":
-        engine.step();
+        // Fire and forget: step() is async now because evaluation may leave
+        // the process, but the control endpoint answers immediately with the
+        // status. A failed step reports itself through the engine's 'error'
+        // event, which is already wired to the store and to WS subscribers.
+        void engine.step();
         break;
       case "stop":
         engine.stop();

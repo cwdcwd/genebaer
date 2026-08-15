@@ -24,9 +24,15 @@ import type {
 } from "./index.js";
 
 describe("OperatorKind", () => {
-  it("covers exactly the six registry kinds", () => {
+  it("covers exactly the seven registry kinds", () => {
     expectTypeOf<OperatorKind>().toEqualTypeOf<
-      "encoding" | "problem" | "selection" | "crossover" | "mutation" | "termination"
+      | "encoding"
+      | "problem"
+      | "selection"
+      | "crossover"
+      | "mutation"
+      | "termination"
+      | "evaluator"
     >();
   });
 
@@ -71,6 +77,31 @@ describe("RunConfig", () => {
 
   it("allows an operator reference without params", () => {
     assertType<RunConfig["problem"]>({ id: "one-max" });
+  });
+
+  it("keeps evaluator OPTIONAL so pre-existing configs and presets still load", () => {
+    // A config written before evaluators existed must remain valid: these are
+    // persisted as config_json and in browser localStorage, and requiring the
+    // field would reject every one of them.
+    assertType<RunConfig>({
+      problem: { id: "one-max" },
+      encoding: { id: "binary" },
+      selection: { id: "tournament" },
+      crossover: { id: "one-point" },
+      mutation: { id: "bit-flip" },
+      mutationRate: 0.01,
+      populationSize: 100,
+      elitism: 2,
+      termination: [{ id: "max-generations" }],
+      seed: 1,
+    });
+  });
+
+  it("accepts an explicit evaluator reference", () => {
+    assertType<NonNullable<RunConfig["evaluator"]>>({
+      id: "local",
+      params: { threads: 4 },
+    });
   });
 
   it("rejects a config missing a required slot", () => {

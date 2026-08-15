@@ -11,6 +11,7 @@ import type { SelectionOperator } from "./operators/selection/base.js";
 import type { CrossoverOperator } from "./operators/crossover/base.js";
 import type { MutationOperator } from "./operators/mutation/base.js";
 import type { TerminationCondition } from "./operators/termination/index.js";
+import type { FitnessEvaluator } from "./operators/evaluator/base.js";
 
 export interface EngineEvents<G = unknown> {
   generation: (stats: GenerationStats) => void;
@@ -33,10 +34,14 @@ export class GeneticAlgorithmEngine<G = unknown> {
 
   private readonly encoding: Encoding<G>;
   private readonly problem: FitnessProblem<G>;
+  private readonly evaluator: FitnessEvaluator<G>;
   private readonly selection: SelectionOperator<G>;
   private readonly crossoverOp: CrossoverOperator<G>;
   private readonly mutationOp: MutationOperator<G>;
   private readonly termination: TerminationCondition[];
+
+  /** Guards against two generations being evaluated concurrently. */
+  private evaluating = false;
 
   private population: G[] = [];
   private fitnesses: number[] = [];
@@ -73,6 +78,13 @@ export class GeneticAlgorithmEngine<G = unknown> {
       "problem",
       config.problem.id,
       config.problem.params,
+    );
+    // Optional by design: a config written before evaluators existed, or one
+    // that simply does not care, scores in-process exactly as it always did.
+    this.evaluator = registry.create<FitnessEvaluator<G>>(
+      "evaluator",
+      config.evaluator?.id ?? "local",
+      config.evaluator?.params,
     );
     this.selection = registry.create<SelectionOperator<G>>(
       "selection",
@@ -177,13 +189,26 @@ export class GeneticAlgorithmEngine<G = unknown> {
     this.scheduleLoop();
   }
 
-  /** Run exactly one generation while paused (or pending). */
-  step(): void {
+  /**
+   * Run exactly one generation while paused (or pending).
+   *
+   * Returns a promise because evaluation may be asynchronous. Callers that
+   * only want to trigger a step can ignore it; callers that need to observe
+   * the result — tests especially — must await it.
+   */
+  async step(): Promise<void> {
     if (this.statusValue === "finished" || this.statusValue === "stopped") return;
     if (this.statusValue === "running") return;
+    // A step while a generation is already in flight would evaluate a
+    // population that is about to be replaced.
+    if (this.evaluating) return;
     if (this.generation === 0) this.initialize();
     this.setStatus("paused");
-    this.runGeneration();
+    try {
+      await this.runGeneration();
+    } catch (err) {
+      this.fail(err);
+    }
   }
 
   stop(): void {
@@ -215,19 +240,26 @@ export class GeneticAlgorithmEngine<G = unknown> {
     this.clearLoop();
     const tick = (): void => {
       if (this.statusValue !== "running") return;
-      try {
-        this.runGeneration();
-      } catch (err) {
-        this.clearLoop();
-        this.setStatus("error");
-        this.emit("error", err instanceof Error ? err : new Error(String(err)));
-        return;
-      }
-      if (this.statusValue === "running") {
-        this.loopHandle = setImmediate(tick);
-      }
+      // The next tick is scheduled only after this generation settles, so a
+      // slow evaluator throttles the loop naturally instead of piling up
+      // overlapping generations.
+      void this.runGeneration().then(
+        () => {
+          if (this.statusValue === "running") {
+            this.loopHandle = setImmediate(tick);
+          }
+        },
+        (err: unknown) => this.fail(err),
+      );
     };
     this.loopHandle = setImmediate(tick);
+  }
+
+  /** Terminal failure path: stop the loop and report, never retry silently. */
+  private fail(err: unknown): void {
+    this.clearLoop();
+    this.setStatus("error");
+    this.emit("error", err instanceof Error ? err : new Error(String(err)));
   }
 
   private clearLoop(): void {
@@ -250,8 +282,27 @@ export class GeneticAlgorithmEngine<G = unknown> {
     return best;
   }
 
-  private evaluatePopulation(): void {
-    this.fitnesses = this.population.map((g) => this.problem.evaluate(g));
+  /**
+   * Score the current population through the configured evaluator.
+   *
+   * Returns the scores rather than assigning them, so the caller can discard
+   * a result that arrived after the run ended without having already mutated
+   * engine state.
+   */
+  private async evaluatePopulation(): Promise<number[]> {
+    const scores = await this.evaluator.evaluateBatch(this.population, {
+      problem: this.problem,
+      generation: this.generation,
+    });
+    if (scores.length !== this.population.length) {
+      throw new Error(
+        `Evaluator '${this.config.evaluator?.id ?? "local"}' ` +
+          `returned ${scores.length} scores for ${this.population.length} genomes. ` +
+          `Fitness is assigned positionally, so a length mismatch would silently ` +
+          `pair genomes with the wrong scores.`,
+      );
+    }
+    return scores;
   }
 
   private computeDiversity(): number {
@@ -279,9 +330,27 @@ export class GeneticAlgorithmEngine<G = unknown> {
       : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
   }
 
-  private runGeneration(): void {
+  private async runGeneration(): Promise<void> {
     const t0 = performance.now();
-    this.evaluatePopulation();
+    this.evaluating = true;
+    let scores: number[];
+    try {
+      scores = await this.evaluatePopulation();
+    } finally {
+      this.evaluating = false;
+    }
+
+    // Evaluation can take arbitrarily long once it leaves this process, so the
+    // run may be over by the time scores arrive. Discard them rather than
+    // resurrecting a stopped run or emitting a generation after 'finished'.
+    if (
+      this.statusValue === "stopped" ||
+      this.statusValue === "finished" ||
+      this.statusValue === "error"
+    ) {
+      return;
+    }
+    this.fitnesses = scores;
 
     const sorted = [...this.fitnesses].sort((a, b) => a - b);
     const best = sorted[sorted.length - 1] as number;

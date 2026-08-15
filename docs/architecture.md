@@ -133,7 +133,7 @@ abstract class BaseOperator {
 
 The static metadata is the whole trick. `paramsSchema` is served to the browser via `GET /api/operators`, and `apps/web` **auto-generates the configuration form from it** (`components/param-fields.tsx`). Declaring a param schema on a new operator is sufficient to make it configurable in the UI — there is no second place to register a form field.
 
-### The six operator kinds
+### The seven operator kinds
 
 ```mermaid
 graph LR
@@ -144,8 +144,10 @@ graph LR
     BO --> CX["CrossoverOperator&lt;G&gt;"]
     BO --> MUT["MutationOperator&lt;G&gt;"]
     BO --> TERM["TerminationCondition"]
+    BO --> EVAL["FitnessEvaluator&lt;G&gt;"]
 
     style BO fill:#2d3748,stroke:#63b3ed,color:#fff
+    style EVAL fill:#2d3748,stroke:#b794f4,color:#fff
 ```
 
 | Kind | Contract | Built-ins |
@@ -156,8 +158,25 @@ graph LR
 | `crossover` | `crossover(a, b, rng) → [G, G]` | one-point, two-point, uniform, arithmetic |
 | `mutation` | `mutate(genome, rate, rng) → G` | bitflip, gaussian, swap, char |
 | `termination` | `check(history) → string \| null` | max-generations, target-fitness, stagnation |
+| `evaluator` | `evaluateBatch(genomes, ctx) → Promise<number[]>` | local |
 
 **Fitness is always maximized.** Higher is better, everywhere. A minimization problem must negate inside `evaluate`.
+
+**`problem` is *what* is optimized; `evaluator` is *how and where* it is scored.**
+The problem defines fitness; the evaluator decides whether the population is
+scored in-process, on worker threads, or by remote workers. The engine calls
+the evaluator **once per generation with the whole population** and awaits it —
+never once per genome, since a round trip per individual is what makes a remote
+evaluator unusable. `RunConfig.evaluator` is optional and defaults to `local`,
+which calls the problem directly and is what every run did before evaluators
+existed.
+
+Scores are assigned **positionally**, so an evaluator must return exactly one
+score per genome in input order. The engine rejects a length mismatch rather
+than pairing genomes with the wrong scores silently.
+
+> Only the `local` evaluator exists today. The distributed machinery — job
+> queue, worker protocol, leases — is tracked under genebaer-pyg.
 
 **`Encoding<G>` is the type anchor.** It defines what a genome *is* for a run; every other operator is generic over the same `G`. Compatibility is advertised via a static `compatibleEncodings` array, which the registry surfaces as metadata and the UI uses to filter incompatible choices out of the form.
 

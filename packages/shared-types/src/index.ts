@@ -41,7 +41,13 @@ export type OperatorKind =
   | "selection"
   | "crossover"
   | "mutation"
-  | "termination";
+  | "termination"
+  /**
+   * How fitness is computed, as opposed to what is being optimized. The
+   * problem defines the objective; the evaluator defines where and how that
+   * objective is scored — in-process, on worker threads, or by remote workers.
+   */
+  | "evaluator";
 
 export interface OperatorMeta {
   /** Registration id used in RunConfig, e.g. "tournament". */
@@ -80,7 +86,19 @@ export interface RunConfig {
   elitism: number;
   /** Stop when ANY listed condition fires. */
   termination: OperatorRef[];
-  /** Seed for the run's RNG. Same seed + config ⇒ identical run. */
+  /**
+   * How fitness is computed. OPTIONAL on purpose: omitting it means "local",
+   * i.e. scored in-process by calling the problem directly, which is what every
+   * run did before evaluators existed. Configs are validated by zod, persisted
+   * as `config_json`, and saved to browser localStorage as presets — making
+   * this required would reject every stored run and every saved preset.
+   */
+  evaluator?: OperatorRef;
+  /**
+   * Seed for the run's RNG. Same seed + config ⇒ identical run, *provided the
+   * evaluator is deterministic*. A model-backed evaluator generally is not; a
+   * score cache is what restores exact replay in that case.
+   */
   seed: number;
 }
 
