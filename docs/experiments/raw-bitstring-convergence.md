@@ -101,10 +101,15 @@ noisier, particularly early on when every candidate is noise.
 
 So this result removes one risk (the encoding is not inert) without removing the
 other (the fitness signal may still be too flat to climb). Measuring that needs
-real CLIP inference and belongs to a follow-up, tracked as genebaer-kz9.
+real CLIP inference. **That has now been measured** - see
+[clip-gradient.md](./clip-gradient.md). Short version: CLIP does provide a
+climbable gradient, and climbing it produces ADVERSARIAL images rather than
+recognisable ones, which makes the alternative encodings below necessary rather
+than optional.
 
-**Alternative encodings were not needed.** The bead said to evaluate
-palette-indexed pixels or vector primitives *if* raw bit strings failed to beat
-the baseline. They did not fail, so that comparison was not run. It remains the
-obvious next lever if CLIP's gradient turns out to be too weak, since both
-alternatives make a single mutation change far more of the image.
+**Alternative encodings were not needed here, but ARE needed.** The bead said to
+evaluate palette-indexed pixels or vector primitives *if* raw bit strings failed
+this baseline. They did not fail it. But genebaer-kz9 then found a different
+reason to need them: under real CLIP the raw encoding converges on adversarial
+noise, and constraining the search space is the most direct fix. Tracked as
+genebaer-6hf.
