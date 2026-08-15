@@ -221,21 +221,25 @@ pnpm + turbo monorepo. Node >= 20, pnpm 11.9.0.
 
 ```bash
 pnpm install
-pnpm typecheck   # tsc --noEmit across all 4 packages — REAL GATE
-pnpm test        # vitest — REAL GATE (core: 36 tests, server: 5)
-pnpm build       # tsc + next build
+pnpm typecheck   # tsc --noEmit across all 5 packages — REAL GATE
+pnpm test        # vitest — REAL GATE, 292 tests
+pnpm build       # tsc + asset copy + next build
 pnpm lint        # eslint (flat config) — REAL GATE, --max-warnings=0
 pnpm dev         # turbo run dev: server + web visualizer
+pnpm setup:git   # install the beads merge driver (once per clone)
 ```
 
 ### Gate status
 
 | Gate | Real? | Coverage |
 | --- | --- | --- |
-| `typecheck` | yes | all 4 packages |
-| `test` | yes | all 4 packages — 99 tests (core 36, server 5, web 37, shared-types 21 type-level) |
-| `lint` | yes | all 4 packages; ESLint flat config at repo root, `--max-warnings=0` |
-| `build` | yes | all 4 packages |
+| `typecheck` | yes | all 5 packages, including test files |
+| `test` | yes | all 5 packages — 292 tests (core 55, server 143, web 37, shared-types 32 type-level, vision 25) |
+| `lint` | yes | all 5 packages; ESLint flat config at repo root, type-aware, `--max-warnings=0` |
+| `build` | yes | all 5 packages |
+
+Counts drift. Re-run `pnpm test` before quoting one — a gate table that
+misreports is worse than no table, because the loop protocol tells you to trust it.
 
 **Linting.** One flat config at the repo root (`eslint.config.mjs`); each package
 runs `eslint . --config ../../eslint.config.mjs --max-warnings=0`, so config
@@ -268,13 +272,24 @@ linting at the same time, which is precisely what genebaer-uyf fixed.
 Extensible genetic algorithm runner with a live web visualizer.
 
 - `packages/core` — the GA engine: population, selection, crossover, mutation,
-  termination. Pure and dependency-light; where the real logic and the real
-  test coverage live.
-- `packages/server` — runs the engine and streams generation-by-generation
-  state to clients.
-- `packages/shared-types` — the type contract between server and web; imported
-  by both, so changes here are breaking changes in two directions.
+  termination, and the **evaluator** abstraction. Pure and dependency-light;
+  never reaches the browser bundle.
+- `packages/server` — runs the engine, streams state to clients, and hosts the
+  distributed evaluation machinery: job queue, worker registry, leases, score
+  cache, worker-thread pool.
+- `packages/vision` — image genome, the image problem, and a dependency-free
+  PNG encoder.
+- `packages/shared-types` — the type contract between server, workers and web;
+  imported by all, so changes here are breaking changes in several directions.
 - `apps/web` — Next.js visualizer (dev on port 3000).
+
+**Seven operator kinds**, not six: `encoding`, `problem`, `selection`,
+`crossover`, `mutation`, `termination`, and `evaluator`. The problem defines
+*what* fitness means; the evaluator defines *how and where* it is computed —
+in-process, on worker threads, or by remote workers including browser tabs.
+
+Full treatment, including the job lifecycle, leases, and the sharp edges:
+**[docs/architecture.md](docs/architecture.md)**.
 
 ## Conventions & Patterns
 

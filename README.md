@@ -3,16 +3,24 @@
 An extensible genetic algorithm runner with a live web visualizer.
 
 ```text
-┌──────────────┐  WS/REST   ┌───────────────┐    uses     ┌────────────────┐
-│  apps/web    │ ◄────────► │ packages/     │ ──────────► │ packages/core  │
-│  (Next.js)   │            │ server        │             │ (GA engine)    │
-└──────────────┘            │ (Fastify+WS)  │             └────────────────┘
-                            │ + SQLite      │                    ▲
-                            └───────────────┘     shared wire types
-                                     ▲          ┌────────────────────────┐
-                                     └───────── │ packages/shared-types  │
+┌──────────────┐  WS/REST   ┌───────────────┐   uses    ┌────────────────┐
+│  apps/web    │ ◄────────► │ packages/     │ ────────► │ packages/core  │
+│  (Next.js)   │            │ server        │           │ (GA engine)    │
+└──────────────┘            │ (Fastify+WS)  │           └────────────────┘
+       ▲                    │ + SQLite      │                  ▲
+       │                    │ + job queue   │      shared wire types
+       │  worker protocol   └───────────────┘   ┌────────────────────────┐
+       │  (/ws/worker)              ▲   ▲   └── │ packages/shared-types  │
+       └────────────────────────────┘   │       └────────────────────────┘
+                                        │  uses ┌────────────────────────┐
+   workers: browser tabs, worker        └────── │ packages/vision        │
+   threads, or anything over HTTP              │ (image genome + PNG)   │
                                                 └────────────────────────┘
 ```
+
+**Fitness can run anywhere.** A run names a scoring *contract*; whichever
+workers are connected — server threads, browser tabs, remote boxes — serve it.
+See **[docs/architecture.md](docs/architecture.md)**.
 
 ## Quick start
 
@@ -45,13 +53,16 @@ Every GA aspect is an abstract base class with a static `operatorId` + JSON Sche
 | `crossover`   | `one-point`, `two-point`, `uniform`, `arithmetic` |
 | `mutation`    | `bit-flip`, `gaussian`, `swap`, `char` |
 | `termination` | `max-generations`, `target-fitness`, `stagnation` |
-| `problem`     | `one-max`, `sphere`, `rastrigin`, `weasel`, `mds` |
+| `problem`     | `one-max`, `sphere`, `rastrigin`, `weasel`, `mds`, `image-prompt` |
+| `evaluator`   | `local` (in-process), `clip-similarity` (model-backed, distributed) |
 
-`GeneticAlgorithmEngine` consumes a declarative `RunConfig` (JSON-serializable), resolves it via the registry, and exposes `start/pause/resume/step/stop` plus typed events (`generation`, `best`, `finished`, `status`, `error`). Runs are seeded (mulberry32) → same seed + config = identical run.
+`GeneticAlgorithmEngine` consumes a declarative `RunConfig` (JSON-serializable), resolves it via the registry, and exposes `start/pause/resume/step/stop` plus typed events (`generation`, `best`, `finished`, `status`, `error`). Runs are seeded (mulberry32) → same seed + config = identical run, PROVIDED the evaluator is deterministic. A model-backed evaluator is not; the score cache is what makes a replay exact. See docs/architecture.md.
 
 ### `@genebaer/server` — Fastify REST + WebSocket + SQLite
 
-`RunManager` holds live engines, fans events out to WS subscribers and SQLite. Persists: run config/status, per-generation stats, best genome per generation. macOS-safe prisma: `journal_mode = MEMORY`, `locking_mode = EXCLUSIVE`.
+`RunManager` holds live engines, fans events out to WS subscribers and SQLite. Persists: run config/status, per-generation stats, best genome per generation. macOS-safe pragmas: `journal_mode = MEMORY`, `locking_mode = EXCLUSIVE`.
+
+It also hosts distributed evaluation: a job queue, a worker registry with versioned capability matching, leases with re-dispatch, and a score cache.
 
 REST (default `:4040`):
 ```
@@ -62,10 +73,30 @@ GET    /api/runs → RunSummary[]
 GET    /api/runs/:id → RunDetail (incl. stats[])
 POST   /api/runs/:id/control  {action: pause|resume|step|stop}
 GET    /api/runs/:id/visual    current-best visual frame
+GET    /api/runs/:id/image.png best genome as a PNG
 DELETE /api/runs/:id
+
+# workers
+POST   /api/workers/register   {capabilities:[{evaluatorId,version}]} → {workerId}
+POST   /api/workers/claim      → lease + jobs, or {idle:true}
+POST   /api/workers/score      {leaseId,evaluationId,index,score}
+POST   /api/workers/heartbeat  → {extended} — false means re-claim
+POST   /api/workers/fail       fail an evaluation this worker cannot score
+GET    /api/workers            connected workers + queue stats
+GET    /api/eval/stats         queue depth, cache, and NAMED blockers
 ```
 
-WS: `ws://:4040/ws` — send `{"type":"subscribe","runId":"…"}`; receive `generation | best | finished | status`. See `packages/shared-types/src/index.ts`.
+WS:
+- `ws://:4040/ws` — runs. Send `{"type":"subscribe","runId":"…"}`; receive `generation | best | finished | status | annotation`.
+- `ws://:4040/ws/worker` — workers. Same protocol as the HTTP endpoints above, so a browser tab is a transport, not a special case.
+
+See `packages/shared-types/src/index.ts` for both.
+
+### `@genebaer/vision` — image genome, image problem, PNG
+
+Raw pixel bit-string genomes (reusing the existing `binary` encoding and
+`bit-flip` mutation unchanged), the `image-prompt` problem, and a
+dependency-free PNG encoder built on Node's `zlib`.
 
 ### `apps/web` — Next.js 15 visualizer
 
@@ -105,7 +136,7 @@ Same pattern: subclass the base (`SelectionOperator`, `CrossoverOperator`, `Muta
 ## Tests
 
 ```sh
-pnpm test   # vitest in core (36) + server (5)
+pnpm test   # 292 tests across all 5 packages
 ```
 
 ## Data
