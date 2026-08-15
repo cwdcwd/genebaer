@@ -221,6 +221,15 @@ export class RunStore {
     return info.changes > 0;
   }
 
+  /**
+   * The underlying connection, so collaborators such as the score cache can
+   * share it. RunStore opens SQLite with locking_mode = EXCLUSIVE, so opening
+   * a second connection to the same file would contend with this one.
+   */
+  get database(): Database.Database {
+    return this.db;
+  }
+
   close(): void {
     this.db.close();
   }

@@ -4,6 +4,7 @@ import {
   type EvaluationContext,
 } from "@genebaer/core";
 import type { JobQueue } from "./job-queue.js";
+import { getActiveScoreCache, scoreKey } from "./score-cache.js";
 
 /**
  * The queue a queued evaluator submits to.
@@ -54,19 +55,64 @@ export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
     return `${this.contract}@${this.version}`;
   }
 
-  override evaluateBatch(
+  override async evaluateBatch(
     genomes: readonly unknown[],
     _context: EvaluationContext<unknown>,
   ): Promise<number[]> {
     const queue = activeQueue;
     if (!queue) {
-      return Promise.reject(
-        new Error(
-          `Evaluator '${this.identity}' needs a job queue, but none is active. ` +
-            `Queued evaluators only work inside a running server.`,
-        ),
+      throw new Error(
+        `Evaluator '${this.identity}' needs a job queue, but none is active. ` +
+          `Queued evaluators only work inside a running server.`,
       );
     }
-    return queue.submit(this.contract, this.version, this.params, genomes);
+
+    const cache = getActiveScoreCache();
+    if (!cache) {
+      return queue.submit(this.contract, this.version, this.params, genomes);
+    }
+
+    // Resolve what we already know, and collapse repeats. Elitism clones the
+    // top N genomes verbatim into every generation, so without this the same
+    // genomes are re-scored at full cost forever.
+    const scores = new Array<number | undefined>(genomes.length);
+    const missIndicesByKey = new Map<string, number[]>();
+    for (let i = 0; i < genomes.length; i++) {
+      const key = scoreKey(this.contract, this.version, this.params, genomes[i]);
+      const hit = cache.get(key);
+      if (hit !== undefined) {
+        scores[i] = hit;
+        continue;
+      }
+      const existing = missIndicesByKey.get(key);
+      if (existing) {
+        // Same genome twice in one batch: score it once, fan the result out.
+        existing.push(i);
+      } else {
+        missIndicesByKey.set(key, [i]);
+      }
+    }
+
+    const uniqueMisses = [...missIndicesByKey.entries()];
+    const dedupedCount =
+      uniqueMisses.reduce((n, [, idxs]) => n + idxs.length, 0) - uniqueMisses.length;
+    if (dedupedCount > 0) cache.countDeduped?.(dedupedCount);
+
+    if (uniqueMisses.length > 0) {
+      const missGenomes = uniqueMisses.map(([, idxs]) => genomes[idxs[0] as number]);
+      const fresh = await queue.submit(
+        this.contract,
+        this.version,
+        this.params,
+        missGenomes,
+      );
+      uniqueMisses.forEach(([key, idxs], slot) => {
+        const score = fresh[slot] as number;
+        cache.set(key, score);
+        for (const idx of idxs) scores[idx] = score;
+      });
+    }
+
+    return scores as number[];
   }
 }

@@ -17,6 +17,7 @@ import { JobQueue } from "./eval/job-queue.js";
 import { setActiveQueue } from "./eval/queued-evaluator.js";
 import { WorkerRegistry } from "./eval/worker-registry.js";
 import { registerWorkerRoutes } from "./eval/worker-routes.js";
+import { SqliteScoreCache, setActiveScoreCache } from "./eval/score-cache.js";
 import { RunStore } from "./db/run-store.js";
 
 const runConfigSchema = z.object({
@@ -59,6 +60,7 @@ export interface GenebaerServer {
   store: RunStore;
   jobQueue: JobQueue;
   workerRegistry: WorkerRegistry;
+  scoreCache: SqliteScoreCache;
   listen: FastifyInstance["listen"];
   close: FastifyInstance["close"];
 }
@@ -71,7 +73,11 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   // registry constructs operators with params only and cannot inject services.
   const jobQueue = new JobQueue();
   const workerRegistry = new WorkerRegistry();
+  // Shares the store connection: RunStore opens SQLite with
+  // locking_mode = EXCLUSIVE, so a second connection would fight it.
+  const scoreCache = new SqliteScoreCache(store.database);
   setActiveQueue(jobQueue);
+  setActiveScoreCache(scoreCache);
 
   const app = Fastify({ logger: opts.logger ?? false });
 
@@ -196,6 +202,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     runManager.shutdown();
     jobQueue.cancelAll("Server is shutting down");
     setActiveQueue(null);
+    setActiveScoreCache(null);
     store.close();
   });
 
@@ -205,6 +212,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     store,
     jobQueue,
     workerRegistry,
+    scoreCache,
     listen: app.listen.bind(app),
     close: app.close.bind(app),
   };
