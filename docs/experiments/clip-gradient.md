@@ -64,6 +64,35 @@ confines the search to the manifold of plausible images, so it leaves it.
 The corroborating detail: for "a solid red image" the GA reached 0.3302, while a
 perfect solid red field scores 0.3052. It beat the literal correct answer.
 
+### Is a drawn control too easy on CLIP?
+
+Fair challenge. CLIP is trained on natural photographs, so a flat-colour drawn
+circle is itself somewhat off-manifold — 0.2621 might be low because the
+*control* is a poor image, not because the GA is uniquely adversarial. And the
+"photograph of a cat" run had no control at all, which is the prompt where a
+real photo is most obviously the right ceiling.
+
+So it was measured with an actual photograph:
+
+| Image | CLIP score |
+| --- | --- |
+| A real photograph of cats, 640×480 | 0.2370 |
+| The same photo resized to 32×32, matching the GA's resolution | 0.2122 |
+| **GA-evolved 32×32 noise** | **0.3189** |
+
+The natural baseline makes the result **stronger, not weaker**. The GA's noise
+beats a genuine cat photograph by 35%, and beats the resolution-matched control —
+the fairest comparison, since both are 32×32 inputs — by **50%**.
+
+The drawn-circle control was being generous to CLIP. A real image of the thing
+the prompt asks for scores *lower* than a drawn approximation, and both are far
+below what unconstrained search finds.
+
+Note also how low the ceiling is in absolute terms: a correct, high-quality
+natural photograph scores 0.2370, while the achievable adversarial score exceeds
+0.34. There is more headroom *outside* the manifold than inside it, which is
+precisely why an unconstrained optimiser leaves.
+
 ## What this means for the epic
 
 The encoding works. The fitness signal is climbable. **The pairing does not
@@ -93,7 +122,8 @@ can be evaluated with the same random-search-baseline method used here.
   fool, though the literature suggests the effect persists.
 - **One resolution.** 32×32, upscaled to CLIP's 224×224 input. Larger genomes
   have more room for adversarial structure, not less.
-- **"Recognisable" was assessed by comparison, not by a human study.** The
-  drawn-circle control is a strong signal, not a formal evaluation.
+- **"Recognisable" was assessed by comparison, not by a human study.** Two
+  independent controls agree - a drawn target and a real photograph - which is a
+  strong signal, but not a formal evaluation.
 - **Not run in CI.** ~150MB of weights and a network make that a poor trade for
   every push; the spike scripts are reproducible on demand.
