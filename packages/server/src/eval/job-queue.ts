@@ -24,7 +24,12 @@ export interface EvalJob {
 
 interface PendingEvaluation {
   readonly evaluatorId: string;
+  readonly evaluatorVersion: string;
   readonly total: number;
+  /** When the generation was enqueued, for the queue-wait split. */
+  readonly submittedAt: number;
+  /** When a worker first took any of it — end of queue wait, start of work. */
+  firstClaimedAt: number | null;
   readonly scores: (number | undefined)[];
   remaining: number;
   resolve: (scores: number[]) => void;
@@ -38,6 +43,28 @@ export interface Lease {
   readonly workerId: string;
   readonly jobs: readonly EvalJob[];
   expiresAt: number;
+}
+
+export interface OutstandingJob {
+  index: number;
+  /** Worker currently holding it, or null when nobody has claimed it. */
+  workerId: string | null;
+  leaseExpiresAt: number | null;
+}
+
+export interface InflightEvaluation {
+  evaluationId: string;
+  evaluatorId: string;
+  evaluatorVersion: string;
+  total: number;
+  outstanding: OutstandingJob[];
+  /** Total time this generation has been open. */
+  waitingMs: number;
+  /** Time spent waiting for ANY worker to take it. */
+  queueWaitMs: number;
+  /** Time since work actually began. */
+  scoringMs: number;
+  unclaimed: number;
 }
 
 export interface QueueStats {
@@ -95,6 +122,9 @@ export class JobQueue {
     return new Promise<number[]>((resolve, reject) => {
       this.evaluations.set(evaluationId, {
         evaluatorId,
+        evaluatorVersion,
+        submittedAt: Date.now(),
+        firstClaimedAt: null,
         total: genomes.length,
         scores: new Array<number | undefined>(genomes.length),
         remaining: genomes.length,
@@ -130,6 +160,13 @@ export class JobQueue {
       const job = this.pending[i] as EvalJob;
       const key = `${job.evaluatorId}@${job.evaluatorVersion}`;
       if (able.has(key) && this.evaluations.has(job.evaluationId)) {
+        const evaluation = this.evaluations.get(job.evaluationId);
+        // First claim marks the boundary between waiting for a worker and
+        // actually being worked on — the two halves of a slow generation that
+        // need very different fixes.
+        if (evaluation && evaluation.firstClaimedAt === null) {
+          evaluation.firstClaimedAt = Date.now();
+        }
         taken.push(job);
         this.pending.splice(i, 1);
       } else {
@@ -301,6 +338,50 @@ export class JobQueue {
       this.failEvaluation(id, new Error(reason));
     }
     this.pending.length = 0;
+  }
+
+  /**
+   * What is holding each open generation up.
+   *
+   * The generational barrier means the SLOWEST claim sets the pace, so
+   * "which job, held by which worker, for how long" is the difference between
+   * tuning this system and guessing at it. Every failure mode here looks
+   * identical from outside — the run simply stops advancing — and this is what
+   * tells them apart.
+   */
+  inflight(now: number = Date.now()): InflightEvaluation[] {
+    const out: InflightEvaluation[] = [];
+    for (const [evaluationId, evaluation] of this.evaluations) {
+      const outstanding: OutstandingJob[] = [];
+      for (let index = 0; index < evaluation.total; index++) {
+        if (evaluation.scores[index] !== undefined) continue;
+        const leaseId = this.leaseByJob.get(jobKey(evaluationId, index));
+        const lease = leaseId ? this.leases.get(leaseId) : undefined;
+        outstanding.push({
+          index,
+          ...(lease
+            ? { workerId: lease.workerId, leaseExpiresAt: lease.expiresAt }
+            : { workerId: null, leaseExpiresAt: null }),
+        });
+      }
+      out.push({
+        evaluationId,
+        evaluatorId: evaluation.evaluatorId,
+        evaluatorVersion: evaluation.evaluatorVersion,
+        total: evaluation.total,
+        outstanding,
+        waitingMs: now - evaluation.submittedAt,
+        queueWaitMs:
+          evaluation.firstClaimedAt === null
+            ? now - evaluation.submittedAt
+            : evaluation.firstClaimedAt - evaluation.submittedAt,
+        scoringMs:
+          evaluation.firstClaimedAt === null ? 0 : now - evaluation.firstClaimedAt,
+        /** Nobody is holding these; they are simply unclaimed. */
+        unclaimed: outstanding.filter((j) => j.workerId === null).length,
+      });
+    }
+    return out;
   }
 
   stats(): QueueStats {

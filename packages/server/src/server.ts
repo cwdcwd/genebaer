@@ -221,6 +221,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   registerWorkerRoutes(app, {
     queue: jobQueue,
     registry: workerRegistry,
+    cache: scoreCache,
     ...(opts.leaseMs === undefined ? {} : { leaseMs: opts.leaseMs }),
   });
 

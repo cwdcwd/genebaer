@@ -45,6 +45,8 @@ export interface WorkerRoutesOptions {
   leaseMs?: number;
   /** How long a worker may go unheard-from before it is reaped. */
   maxSilenceMs?: number;
+  /** Score cache, for hit-rate reporting. */
+  cache?: { stats(): { hits: number; misses: number; dedupedInBatch: number } };
 }
 
 /**
@@ -171,6 +173,41 @@ export function registerWorkerRoutes(
         lastSeen: w.lastSeen,
       })),
       queue: queue.stats(),
+    };
+  });
+
+  /**
+   * Everything needed to diagnose a run that is not advancing.
+   *
+   * Without this, a missing worker, a re-dispatch loop, one straggler holding
+   * the barrier, and a cache that never hits are indistinguishable: the run
+   * just stops moving.
+   */
+  app.get("/api/eval/stats", async () => {
+    sweep();
+    const inflight = queue.inflight();
+    return {
+      queue: queue.stats(),
+      cache: opts.cache?.stats() ?? null,
+      workers: registry.list().map((w) => ({
+        workerId: w.workerId,
+        kind: w.kind,
+        capabilities: w.capabilities,
+        lastSeen: w.lastSeen,
+      })),
+      // The generational barrier means the slowest claim sets the pace, so the
+      // blocker is named rather than left to be inferred.
+      inflight,
+      blockers: inflight.map((e) => ({
+        evaluationId: e.evaluationId,
+        contract: `${e.evaluatorId}@${e.evaluatorVersion}`,
+        remaining: e.outstanding.length,
+        unclaimed: e.unclaimed,
+        queueWaitMs: e.queueWaitMs,
+        scoringMs: e.scoringMs,
+        heldBy: [...new Set(e.outstanding.map((j) => j.workerId).filter(Boolean))],
+        servable: registry.canServe(e.evaluatorId, e.evaluatorVersion),
+      })),
     };
   });
 }
