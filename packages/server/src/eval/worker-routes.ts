@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { EvalJobPayload } from "@genebaer/shared-types";
 import type { JobQueue } from "./job-queue.js";
 import type { WorkerRegistry } from "./worker-registry.js";
+import type { CaptionQueue } from "./caption-queue.js";
 
 const capabilitySchema = z.object({
   evaluatorId: z.string().min(1),
@@ -47,6 +48,8 @@ export interface WorkerRoutesOptions {
   maxSilenceMs?: number;
   /** Score cache, for hit-rate reporting. */
   cache?: { stats(): { hits: number; misses: number; dedupedInBatch: number } };
+  /** Optional caption queue; captions are best-effort and never block a run. */
+  captions?: CaptionQueue;
 }
 
 /**
@@ -161,6 +164,51 @@ export function registerWorkerRoutes(
       new Error(`Worker reported failure: ${parsed.data.reason}`),
     );
     return { ok: true };
+  });
+
+  // ---------- captions ----------
+  //
+  // A separate path from scoring, deliberately: a caption is text for a human
+  // and must never be able to stand in for a score.
+
+  app.post("/api/workers/caption/claim", async (req, reply) => {
+    const parsed = z
+      .object({ workerId: z.string().min(1), max: z.number().int().min(1).max(16) })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+    registry.touch(parsed.data.workerId);
+    const captions = opts.captions;
+    if (!captions) return { requests: [] };
+    // Stale requests are dropped, never re-dispatched: nothing waits on a
+    // caption, so re-dispatch machinery would be cost with no benefit.
+    captions.expire(60_000);
+    return { requests: captions.claim(parsed.data.max) };
+  });
+
+  app.post("/api/workers/caption/submit", async (req, reply) => {
+    const parsed = z
+      .object({
+        workerId: z.string().min(1),
+        requestId: z.string().min(1),
+        runId: z.string().min(1),
+        generation: z.number().int().min(0),
+        caption: z.string().min(1),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+    registry.touch(parsed.data.workerId);
+    const accepted =
+      opts.captions?.complete(
+        parsed.data.requestId,
+        parsed.data.runId,
+        parsed.data.generation,
+        parsed.data.caption,
+      ) ?? false;
+    return { accepted };
   });
 
   app.get("/api/workers", async () => {

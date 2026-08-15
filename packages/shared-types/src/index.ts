@@ -176,7 +176,19 @@ export type WsServerMessage =
       finalBestFitness: number;
       generations: number;
     }
-  | { type: "status"; runId: string; status: RunStatus };
+  | { type: "status"; runId: string; status: RunStatus }
+  /**
+   * A human-readable note about a generation - currently a VLM caption of the
+   * best genome. Explicitly NOT fitness: it is a progress check for a person,
+   * never an input to selection.
+   */
+  | {
+      type: "annotation";
+      runId: string;
+      generation: number;
+      kind: "caption";
+      text: string;
+    };
 
 /** Client → server messages. */
 export type WsClientMessage =

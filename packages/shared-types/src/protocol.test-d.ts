@@ -146,7 +146,7 @@ describe("RunSummary / RunDetail", () => {
 describe("WebSocket protocol", () => {
   it("discriminates server messages on `type`", () => {
     expectTypeOf<WsServerMessage["type"]>().toEqualTypeOf<
-      "generation" | "best" | "finished" | "status"
+      "generation" | "best" | "finished" | "status" | "annotation"
     >();
   });
 
@@ -247,5 +247,28 @@ describe("Worker protocol", () => {
   it("does not let a worker masquerade as a run subscriber", () => {
     // @ts-expect-error worker messages are a separate channel from run subscriptions
     assertType<WsClientMessage>({ type: "worker.claim", max: 4 });
+  });
+});
+
+describe("annotations", () => {
+  it("adds annotation to the server message union", () => {
+    expectTypeOf<WsServerMessage["type"]>().toEqualTypeOf<
+      "generation" | "best" | "finished" | "status" | "annotation"
+    >();
+  });
+
+  it("carries TEXT, keeping it structurally distinct from fitness", () => {
+    // A caption must never be able to stand in for a score.
+    const msg = {} as WsServerMessage;
+    if (msg.type === "annotation") {
+      expectTypeOf(msg.text).toEqualTypeOf<string>();
+      expectTypeOf(msg.generation).toEqualTypeOf<number>();
+      expectTypeOf(msg.kind).toEqualTypeOf<"caption">();
+    }
+  });
+
+  it("rejects an annotation without its text", () => {
+    // @ts-expect-error an annotation with no text says nothing
+    assertType<WsServerMessage>({ type: "annotation", runId: "r", generation: 1, kind: "caption" });
   });
 });
