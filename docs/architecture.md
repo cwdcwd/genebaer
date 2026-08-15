@@ -68,7 +68,7 @@ All four are real and cover all four packages. This matters more than usual here
 | Gate | Command | Coverage |
 | --- | --- | --- |
 | Typecheck | `pnpm typecheck` | 4 packages, `tsc --noEmit`, **including test files** |
-| Test | `pnpm test` | 99 tests |
+| Test | `pnpm test` | 103 tests |
 | Lint | `pnpm lint` | ESLint flat config, type-aware, `--max-warnings=0` |
 | Build | `pnpm build` | `tsc -p tsconfig.build.json` + `next build` |
 
@@ -307,7 +307,11 @@ Single endpoint `/ws`. Clients send `{type: "subscribe" | "unsubscribe", runId}`
 | `status` | `status: RunStatus` |
 | `finished` | `reason`, `finalBestFitness`, `generations` |
 
-> **Sharp edge:** `unsubscribe` clears **every** subscription on that socket, not just the named run. The server-side comment calls this the "cheap approach" and expects the client to resubscribe to anything else it still wants. Today the UI watches one run per socket, so it doesn't bite — but a multi-run view would hit it immediately.
+Subscriptions are tracked per socket in a `Map` keyed by `runId`, so one socket
+may watch several runs independently: `unsubscribe` tears down only the named
+run, and re-subscribing to a run already being watched *replaces* its handler
+rather than stacking a second one. Both behaviors are covered by regression
+tests in `server.test.ts`.
 
 ### Web data flow
 
@@ -359,9 +363,8 @@ The same shape applies to the other five kinds — different base class, differe
 
 Verified, current, and worth knowing before you debug them:
 
-1. **Runs live in memory.** `RunManager` holds engines in a `Map`. A server restart loses every live engine while its SQLite row still reads `running` — control calls on that run then return 404. There is no rehydration path.
-2. **`unsubscribe` drops all subscriptions on the socket** (see above).
-3. **Runs are not restartable.** `start()` on a `finished` or `stopped` run throws.
-4. **`mutationRate` semantics are operator-defined.** Per-gene for `BitFlipMutation`, but each operator interprets the rate itself. Read the operator before assuming.
-5. **`data/` is gitignored.** The SQLite DB is local-only; there is no shared run history.
-6. **`elitism` is validated in two places with different strictness.** zod accepts any non-negative integer; the engine additionally requires `elitism < populationSize` and throws `RangeError`, surfacing as a 422.
+1. **Runs live in memory and do not resume.** `RunManager` holds engines in a `Map`, and the population is never persisted — only stats and the best genome — so a run cannot be continued once its process ends. On boot, `RunManager` **reconciles**: any row still reading `pending`/`running`/`paused` is closed out as `stopped` with a `stopReason` naming the restart. The run is still lost; what changed is that the UI is never told a run is live when nothing is driving it. Closing the server also pauses live engines before the database closes, so shutdown does not leave engines writing to a closed handle.
+2. **Runs are not restartable.** `start()` on a `finished` or `stopped` run throws.
+3. **`mutationRate` semantics are operator-defined.** Per-gene for `BitFlipMutation`, but each operator interprets the rate itself. Read the operator before assuming.
+4. **`data/` is gitignored.** The SQLite DB is local-only; there is no shared run history.
+5. **`elitism` is validated in two places with different strictness.** zod accepts any non-negative integer; the engine additionally requires `elitism < populationSize` and throws `RangeError`, surfacing as a 422.

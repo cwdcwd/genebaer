@@ -19,9 +19,14 @@ function runConfig(config: RunConfig): Promise<{ runId: string; finalBest: numbe
 
     const history: GenerationStats[] = [];
     engine.on("generation", (s) => history.push(s));
-    engine.on("finished", (_reason, finalBest, generations) => {
+    engine.on("finished", (reason, finalBest, generations) => {
       store.writeGenerations(runId, history);
-      store.markFinished(runId, finalBest);
+      store.markTerminal(
+        runId,
+        engine.status === "stopped" ? "stopped" : "finished",
+        finalBest,
+        reason,
+      );
       store.close();
       resolve({ runId, finalBest, generations });
     });

@@ -134,7 +134,9 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
 
   app.register(async function wsRoutes(fastify) {
     fastify.get("/ws", { websocket: true }, (socket: WebSocket) => {
-      const unsubs = new Set<() => void>();
+      // Keyed by runId: unsubscribing from one run must leave this socket's
+      // other subscriptions alone, so a client can watch several runs at once.
+      const unsubs = new Map<string, () => void>();
 
       socket.on("message", (raw: Buffer) => {
         let msg: WsClientMessage;
@@ -144,25 +146,29 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
           return;
         }
         if (msg.type === "subscribe") {
+          // Re-subscribing to a run replaces its handler rather than stacking a
+          // second one, which would deliver every message for it twice.
+          unsubs.get(msg.runId)?.();
           const send = (m: WsServerMessage): void => {
             if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m));
           };
-          unsubs.add(runManager.subscribe(msg.runId, send));
+          unsubs.set(msg.runId, runManager.subscribe(msg.runId, send));
         } else if (msg.type === "unsubscribe") {
-          // Cheap approach: clear all and let client resubscribe to others.
-          for (const u of unsubs) u();
-          unsubs.clear();
+          unsubs.get(msg.runId)?.();
+          unsubs.delete(msg.runId);
         }
       });
 
       socket.on("close", () => {
-        for (const u of unsubs) u();
+        for (const unsub of unsubs.values()) unsub();
         unsubs.clear();
       });
     });
   });
 
   app.addHook("onClose", async () => {
+    // Order matters: halt the engines before closing the database they write to.
+    runManager.shutdown();
     store.close();
   });
 
