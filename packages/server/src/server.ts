@@ -18,6 +18,7 @@ import { setActiveQueue } from "./eval/queued-evaluator.js";
 import { WorkerRegistry } from "./eval/worker-registry.js";
 import { registerWorkerRoutes } from "./eval/worker-routes.js";
 import { SqliteScoreCache, setActiveScoreCache } from "./eval/score-cache.js";
+import { ImagePrompt, encodePng } from "@genebaer/vision";
 import { RunStore } from "./db/run-store.js";
 
 const runConfigSchema = z.object({
@@ -149,6 +150,52 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     const frame = runManager.visualFrame(id);
     if (!frame) return reply.code(404).send({ error: "No visual frame" });
     return frame;
+  });
+
+  /**
+   * Export the best genome of a run as a PNG.
+   *
+   * The one place a real PNG belongs: everywhere else in the pipeline ships raw
+   * pixels, because encoding inside the evaluation loop would be overhead paid
+   * on every genome of every generation.
+   */
+  app.get("/api/runs/:id/image.png", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const detail = store.getRun(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+
+    if (detail.config.problem.id !== ImagePrompt.operatorId) {
+      return reply
+        .code(409)
+        .send({ error: `Run ${id} is not an image run; nothing to export.` });
+    }
+    const latest = detail.stats.at(-1);
+    if (!latest) {
+      // Asking for a picture of a run that has not produced one yet is a
+      // reasonable mistake; an empty or corrupt file would be worse.
+      return reply
+        .code(409)
+        .send({ error: `Run ${id} has no completed generation to export yet.` });
+    }
+
+    try {
+      const problem = new ImagePrompt(detail.config.problem.params ?? {});
+      const genome = latest.bestGenome as number[];
+      const png = encodePng({
+        width: problem.shape.width,
+        height: problem.shape.height,
+        rgb: problem.render(genome),
+      });
+      return reply
+        .header("content-type", "image/png")
+        .header(
+          "content-disposition",
+          `attachment; filename="genebaer-${id}-gen${String(latest.generation)}.png"`,
+        )
+        .send(png);
+    } catch (err) {
+      return reply.code(422).send({ error: (err as Error).message });
+    }
   });
 
   app.delete("/api/runs/:id", async (req, reply) => {
