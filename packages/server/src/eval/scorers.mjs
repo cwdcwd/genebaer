@@ -46,6 +46,29 @@ scorers.set("thread-explode", () => {
   throw new Error("scorer exploded on purpose");
 });
 
+/**
+ * CLIP image-text similarity. Async, and model-backed.
+ *
+ * Registered here so the thread dispatches to it by contract id exactly like
+ * any arithmetic scorer - the pool has no idea one of these needs a model.
+ */
+scorers.set("clip-similarity", async (payload, params) => {
+  const { scoreImageAgainstPrompt } = await import("./clip-backend.mjs");
+  if (!payload || !Array.isArray(payload.rgb)) {
+    throw new TypeError(
+      "clip-similarity: expected a rendered image payload with rgb bytes",
+    );
+  }
+  const prompt = typeof params?.prompt === "string" ? params.prompt : "";
+  if (prompt.length === 0) {
+    throw new Error(
+      "clip-similarity: empty prompt. Scoring against nothing would return a " +
+        "meaningless number that still looks like fitness.",
+    );
+  }
+  return scoreImageAgainstPrompt(payload, prompt);
+});
+
 export function getScorer(evaluatorId) {
   return scorers.get(evaluatorId);
 }

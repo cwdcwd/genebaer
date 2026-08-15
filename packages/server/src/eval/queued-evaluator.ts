@@ -55,9 +55,37 @@ export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
     return `${this.contract}@${this.version}`;
   }
 
+  /**
+   * Turn a genome into the payload a worker actually receives.
+   *
+   * Default is the genome itself. Subclasses override to do work once on the
+   * server that every worker would otherwise repeat — rendering an image
+   * genome to pixels, for instance, so a scorer only has to know about pixels
+   * and never about bit packing.
+   *
+   * Whatever this returns must be JSON-serialisable: it crosses a thread
+   * boundary or a WebSocket.
+   */
+  protected prepare(genome: unknown, _context: EvaluationContext<unknown>): unknown {
+    return genome;
+  }
+
+  /**
+   * Params shipped to workers, and keyed on by the score cache.
+   *
+   * Defaults to the evaluator params. Subclasses override when part of the
+   * scoring input lives on the PROBLEM rather than the evaluator - the image
+   * prompt, for instance. Cache correctness depends on this being the same
+   * value the job carries: keying on anything else would let two different
+   * prompts share an entry.
+   */
+  protected paramsForJob(_context: EvaluationContext<unknown>): Record<string, unknown> {
+    return this.params;
+  }
+
   override async evaluateBatch(
     genomes: readonly unknown[],
-    _context: EvaluationContext<unknown>,
+    context: EvaluationContext<unknown>,
   ): Promise<number[]> {
     const queue = activeQueue;
     if (!queue) {
@@ -67,9 +95,15 @@ export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
       );
     }
 
+    const jobParams = this.paramsForJob(context);
     const cache = getActiveScoreCache();
     if (!cache) {
-      return queue.submit(this.contract, this.version, this.params, genomes);
+      return queue.submit(
+        this.contract,
+        this.version,
+        jobParams,
+        genomes.map((g) => this.prepare(g, context)),
+      );
     }
 
     // Resolve what we already know, and collapse repeats. Elitism clones the
@@ -78,7 +112,7 @@ export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
     const scores = new Array<number | undefined>(genomes.length);
     const missIndicesByKey = new Map<string, number[]>();
     for (let i = 0; i < genomes.length; i++) {
-      const key = scoreKey(this.contract, this.version, this.params, genomes[i]);
+      const key = scoreKey(this.contract, this.version, jobParams, genomes[i]);
       const hit = cache.get(key);
       if (hit !== undefined) {
         scores[i] = hit;
@@ -99,11 +133,13 @@ export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
     if (dedupedCount > 0) cache.countDeduped?.(dedupedCount);
 
     if (uniqueMisses.length > 0) {
-      const missGenomes = uniqueMisses.map(([, idxs]) => genomes[idxs[0] as number]);
+      const missGenomes = uniqueMisses.map(([, idxs]) =>
+        this.prepare(genomes[idxs[0] as number], context),
+      );
       const fresh = await queue.submit(
         this.contract,
         this.version,
-        this.params,
+        jobParams,
         missGenomes,
       );
       uniqueMisses.forEach(([key, idxs], slot) => {

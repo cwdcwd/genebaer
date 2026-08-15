@@ -19,7 +19,8 @@
     "@genebaer/shared-types": "workspace:*",
     "better-sqlite3": "^11.8.0",
     "fastify": "^5.2.0",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "@genebaer/vision": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
