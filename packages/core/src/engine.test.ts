@@ -382,7 +382,7 @@ describe("GeneticAlgorithmEngine", () => {
     expect(a).toBe(b);
   });
 
-  it("pause/step/resume/stop lifecycle works", () => {
+  it("pause/step/resume/stop lifecycle works", async () => {
     const engine = new GeneticAlgorithmEngine<number[]>(
       oneMaxConfig({ termination: [{ id: "max-generations", params: { maxGenerations: 100000 } }] }),
       createDefaultRegistry(),
@@ -395,8 +395,10 @@ describe("GeneticAlgorithmEngine", () => {
     expect(engine.status).toBe("paused");
     const g0 = engine.currentGeneration;
 
-    engine.step();
-    engine.step();
+    // step() is async now: evaluation may leave the process entirely, so a
+    // caller that wants to observe the result has to await it.
+    await engine.step();
+    await engine.step();
     expect(engine.currentGeneration).toBe(g0 + 2);
 
     engine.resume();

@@ -10,6 +10,7 @@
  */
 import { assertType, describe, expectTypeOf, it } from "vitest";
 import type {
+  EvalJobPayload,
   GenerationStats,
   JSONSchema,
   OperatorKind,
@@ -19,14 +20,23 @@ import type {
   RunDetail,
   RunStatus,
   RunSummary,
+  WorkerCapability,
+  WorkerClientMessage,
+  WorkerServerMessage,
   WsClientMessage,
   WsServerMessage,
 } from "./index.js";
 
 describe("OperatorKind", () => {
-  it("covers exactly the six registry kinds", () => {
+  it("covers exactly the seven registry kinds", () => {
     expectTypeOf<OperatorKind>().toEqualTypeOf<
-      "encoding" | "problem" | "selection" | "crossover" | "mutation" | "termination"
+      | "encoding"
+      | "problem"
+      | "selection"
+      | "crossover"
+      | "mutation"
+      | "termination"
+      | "evaluator"
     >();
   });
 
@@ -73,6 +83,31 @@ describe("RunConfig", () => {
     assertType<RunConfig["problem"]>({ id: "one-max" });
   });
 
+  it("keeps evaluator OPTIONAL so pre-existing configs and presets still load", () => {
+    // A config written before evaluators existed must remain valid: these are
+    // persisted as config_json and in browser localStorage, and requiring the
+    // field would reject every one of them.
+    assertType<RunConfig>({
+      problem: { id: "one-max" },
+      encoding: { id: "binary" },
+      selection: { id: "tournament" },
+      crossover: { id: "one-point" },
+      mutation: { id: "bit-flip" },
+      mutationRate: 0.01,
+      populationSize: 100,
+      elitism: 2,
+      termination: [{ id: "max-generations" }],
+      seed: 1,
+    });
+  });
+
+  it("accepts an explicit evaluator reference", () => {
+    assertType<NonNullable<RunConfig["evaluator"]>>({
+      id: "local",
+      params: { threads: 4 },
+    });
+  });
+
   it("rejects a config missing a required slot", () => {
     assertType<RunConfig>(
       // @ts-expect-error missing encoding, selection, crossover, mutation, and more
@@ -111,7 +146,7 @@ describe("RunSummary / RunDetail", () => {
 describe("WebSocket protocol", () => {
   it("discriminates server messages on `type`", () => {
     expectTypeOf<WsServerMessage["type"]>().toEqualTypeOf<
-      "generation" | "best" | "finished" | "status"
+      "generation" | "best" | "finished" | "status" | "annotation"
     >();
   });
 
@@ -161,5 +196,79 @@ describe("JSONSchema", () => {
     expectTypeOf<OperatorMeta["paramsSchema"]>().toEqualTypeOf<
       Record<string, JSONSchema>
     >();
+  });
+});
+
+describe("Worker protocol", () => {
+  it("discriminates worker-bound messages on `type`", () => {
+    expectTypeOf<WorkerServerMessage["type"]>().toEqualTypeOf<
+      "worker.registered" | "worker.lease" | "worker.idle" | "worker.leaseLost"
+    >();
+    expectTypeOf<WorkerClientMessage["type"]>().toEqualTypeOf<
+      | "worker.register"
+      | "worker.claim"
+      | "worker.score"
+      | "worker.heartbeat"
+      | "worker.fail"
+    >();
+  });
+
+  it("narrows a lease message to its jobs", () => {
+    const msg = {} as WorkerServerMessage;
+    if (msg.type === "worker.lease") {
+      expectTypeOf(msg.jobs).toEqualTypeOf<EvalJobPayload[]>();
+      expectTypeOf(msg.expiresAt).toEqualTypeOf<number>();
+    }
+  });
+
+  it("carries a version on every capability, since scores across versions are not comparable", () => {
+    expectTypeOf<WorkerCapability["version"]>().toEqualTypeOf<string>();
+    // @ts-expect-error a capability without a version is not a capability
+    assertType<WorkerCapability>({ evaluatorId: "clip-similarity" });
+  });
+
+  it("keeps a job's population index numeric so scores reassemble positionally", () => {
+    expectTypeOf<EvalJobPayload["index"]>().toEqualTypeOf<number>();
+    expectTypeOf<EvalJobPayload["genome"]>().toBeUnknown();
+  });
+
+  it("requires a leaseId on every submission, so an expired claim is detectable", () => {
+    assertType<WorkerClientMessage>({
+      type: "worker.score",
+      leaseId: "l1",
+      evaluationId: "e1",
+      index: 0,
+      score: 0.5,
+    });
+    // @ts-expect-error a score without its lease cannot be validated
+    assertType<WorkerClientMessage>({ type: "worker.score", evaluationId: "e1", index: 0, score: 1 });
+  });
+
+  it("does not let a worker masquerade as a run subscriber", () => {
+    // @ts-expect-error worker messages are a separate channel from run subscriptions
+    assertType<WsClientMessage>({ type: "worker.claim", max: 4 });
+  });
+});
+
+describe("annotations", () => {
+  it("adds annotation to the server message union", () => {
+    expectTypeOf<WsServerMessage["type"]>().toEqualTypeOf<
+      "generation" | "best" | "finished" | "status" | "annotation"
+    >();
+  });
+
+  it("carries TEXT, keeping it structurally distinct from fitness", () => {
+    // A caption must never be able to stand in for a score.
+    const msg = {} as WsServerMessage;
+    if (msg.type === "annotation") {
+      expectTypeOf(msg.text).toEqualTypeOf<string>();
+      expectTypeOf(msg.generation).toEqualTypeOf<number>();
+      expectTypeOf(msg.kind).toEqualTypeOf<"caption">();
+    }
+  });
+
+  it("rejects an annotation without its text", () => {
+    // @ts-expect-error an annotation with no text says nothing
+    assertType<WsServerMessage>({ type: "annotation", runId: "r", generation: 1, kind: "caption" });
   });
 });

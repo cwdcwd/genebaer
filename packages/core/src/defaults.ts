@@ -21,6 +21,7 @@ import {
   TargetFitness,
   Stagnation,
 } from "./operators/termination/index.js";
+import { LocalEvaluator } from "./operators/evaluator/local.js";
 import { OneMax } from "./problems/one-max.js";
 import { Sphere, Rastrigin } from "./problems/functions.js";
 import { Weasel } from "./problems/weasel.js";
@@ -52,6 +53,8 @@ export function createDefaultRegistry(): OperatorRegistry {
   r.register("termination", MaxGenerations)
     .register("termination", TargetFitness)
     .register("termination", Stagnation);
+
+  r.register("evaluator", LocalEvaluator);
 
   r.register("problem", OneMax)
     .register("problem", Sphere)

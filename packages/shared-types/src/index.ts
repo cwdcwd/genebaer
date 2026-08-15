@@ -41,7 +41,13 @@ export type OperatorKind =
   | "selection"
   | "crossover"
   | "mutation"
-  | "termination";
+  | "termination"
+  /**
+   * How fitness is computed, as opposed to what is being optimized. The
+   * problem defines the objective; the evaluator defines where and how that
+   * objective is scored — in-process, on worker threads, or by remote workers.
+   */
+  | "evaluator";
 
 export interface OperatorMeta {
   /** Registration id used in RunConfig, e.g. "tournament". */
@@ -80,7 +86,19 @@ export interface RunConfig {
   elitism: number;
   /** Stop when ANY listed condition fires. */
   termination: OperatorRef[];
-  /** Seed for the run's RNG. Same seed + config ⇒ identical run. */
+  /**
+   * How fitness is computed. OPTIONAL on purpose: omitting it means "local",
+   * i.e. scored in-process by calling the problem directly, which is what every
+   * run did before evaluators existed. Configs are validated by zod, persisted
+   * as `config_json`, and saved to browser localStorage as presets — making
+   * this required would reject every stored run and every saved preset.
+   */
+  evaluator?: OperatorRef;
+  /**
+   * Seed for the run's RNG. Same seed + config ⇒ identical run, *provided the
+   * evaluator is deterministic*. A model-backed evaluator generally is not; a
+   * score cache is what restores exact replay in that case.
+   */
   seed: number;
 }
 
@@ -158,9 +176,72 @@ export type WsServerMessage =
       finalBestFitness: number;
       generations: number;
     }
-  | { type: "status"; runId: string; status: RunStatus };
+  | { type: "status"; runId: string; status: RunStatus }
+  /**
+   * A human-readable note about a generation - currently a VLM caption of the
+   * best genome. Explicitly NOT fitness: it is a progress check for a person,
+   * never an input to selection.
+   */
+  | {
+      type: "annotation";
+      runId: string;
+      generation: number;
+      kind: "caption";
+      text: string;
+    };
 
 /** Client → server messages. */
 export type WsClientMessage =
   | { type: "subscribe"; runId: string }
   | { type: "unsubscribe"; runId: string };
+
+// ---------- Worker protocol ----------
+
+/**
+ * A scoring contract a worker can fulfil.
+ *
+ * The version is part of the identity, not decoration: scores from two model
+ * versions are not comparable, and mixing them inside one run would distort
+ * the fitness landscape mid-flight in a way no test would catch.
+ */
+export interface WorkerCapability {
+  /** Evaluator id, e.g. "clip-similarity". */
+  evaluatorId: string;
+  version: string;
+}
+
+/** One genome for a worker to score. */
+export interface EvalJobPayload {
+  evaluationId: string;
+  /** Population index. Scores are reassembled by this, never by arrival. */
+  index: number;
+  genome: unknown;
+  evaluatorId: string;
+  params: Record<string, unknown>;
+}
+
+/** Server → worker. */
+export type WorkerServerMessage =
+  | { type: "worker.registered"; workerId: string; leaseMs: number }
+  | {
+      type: "worker.lease";
+      leaseId: string;
+      expiresAt: number;
+      jobs: EvalJobPayload[];
+    }
+  /** No job currently matches this worker's capabilities. */
+  | { type: "worker.idle" }
+  /**
+   * The worker's lease is gone — expired, or released because it dropped off.
+   * Its jobs have been re-dispatched, so it must stop working and re-claim.
+   */
+  | { type: "worker.leaseLost"; leaseId: string; reason: string };
+
+/** Worker → server. */
+export type WorkerClientMessage =
+  | { type: "worker.register"; capabilities: WorkerCapability[] }
+  | { type: "worker.claim"; max: number }
+  | { type: "worker.score"; leaseId: string; evaluationId: string; index: number; score: number }
+  | { type: "worker.heartbeat"; leaseId: string }
+  /** This worker cannot score the job at all; fail the whole evaluation. */
+  | { type: "worker.fail"; leaseId: string; evaluationId: string; reason: string };
