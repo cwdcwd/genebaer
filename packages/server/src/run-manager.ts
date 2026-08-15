@@ -11,6 +11,8 @@ import {
   type OperatorRegistry,
 } from "@genebaer/core";
 import type { RunStore } from "./db/run-store.js";
+import { QueuedEvaluator } from "./eval/queued-evaluator.js";
+import type { WorkerRegistry } from "./eval/worker-registry.js";
 
 /**
  * Owns all live runs. Each run gets a GeneticAlgorithmEngine wired to:
@@ -30,6 +32,12 @@ export class RunManager {
 
   /** Buffer of stats not yet flushed (per runId). */
   private readonly pendingStats = new Map<string, GenerationStats[]>();
+  /** Contract each run needs a worker for, when it uses a queued evaluator. */
+  private readonly requirements = new Map<string, { contract: string; version: string }>();
+  /** Runs this manager paused purely for lack of a capable worker. */
+  private readonly pausedForWorker = new Set<string>();
+  /** Event unsubscribers per run, so a discarded engine stops touching state. */
+  private readonly enginePorts = new Map<string, (() => void)[]>();
   private readonly FLUSH_EVERY = 10;
 
   constructor(store: RunStore, registry?: OperatorRegistry) {
@@ -59,6 +67,7 @@ export class RunManager {
     const id = randomUUID();
     const engine = new GeneticAlgorithmEngine(config, this.registry);
     this.engines.set(id, engine);
+    this.recordRequirement(id, config);
     this.store.createRun(id, config);
     this.wireEngine(id, engine);
     return id;
@@ -101,8 +110,54 @@ export class RunManager {
   deleteRun(id: string): boolean {
     const engine = this.engines.get(id);
     if (engine && engine.status === "running") engine.stop();
+    for (const off of this.enginePorts.get(id) ?? []) off();
+    this.enginePorts.delete(id);
     this.engines.delete(id);
+    this.requirements.delete(id);
+    this.pausedForWorker.delete(id);
     return this.store.deleteRun(id);
+  }
+
+  /**
+   * Pause runs nothing can currently score, and resume them when it can.
+   *
+   * This is the operational failure mode of distributed evaluation. If no
+   * connected worker advertises a run's contract, its jobs queue forever while
+   * the run reports "running" — exactly the dishonesty genebaer-5ft removed
+   * elsewhere in this system. A paused run with a reason is the truth.
+   *
+   * Idempotent, and safe to call on a timer.
+   */
+  superviseWorkerCapacity(registry: WorkerRegistry): void {
+    for (const [id, need] of this.requirements) {
+      const engine = this.engines.get(id);
+      if (!engine) continue;
+      const servable = registry.canServe(need.contract, need.version);
+
+      if (!servable && engine.status === "running") {
+        engine.pause();
+        const reason =
+          `Paused: no connected worker can serve '${need.contract}@${need.version}'. ` +
+          `The run resumes automatically when one registers.`;
+        this.pausedForWorker.add(id);
+        this.store.setStatus(id, "paused", reason);
+        this.broadcast(id, { type: "status", runId: id, status: "paused" });
+        continue;
+      }
+
+      // Only resume runs THIS supervisor paused. A run a human paused must
+      // stay paused, however much worker capacity turns up.
+      if (servable && this.pausedForWorker.has(id) && engine.status === "paused") {
+        this.pausedForWorker.delete(id);
+        this.store.setStatus(id, "running", null);
+        engine.resume();
+      }
+    }
+  }
+
+  /** Whether a run is currently paused solely for lack of a capable worker. */
+  isPausedForWorker(runId: string): boolean {
+    return this.pausedForWorker.has(runId);
   }
 
   /**
@@ -124,6 +179,15 @@ export class RunManager {
       if (buf.length > 0) this.store.writeGenerations(id, buf);
     }
     this.pendingStats.clear();
+
+    // Detach every engine listener before dropping the engines. An in-flight
+    // evaluation rejected during shutdown settles on a LATER microtask, by
+    // which point the store is closed — a still-wired engine would then try to
+    // persist its error into a closed database.
+    for (const offs of this.enginePorts.values()) {
+      for (const off of offs) off();
+    }
+    this.enginePorts.clear();
     this.engines.clear();
   }
 
@@ -151,7 +215,9 @@ export class RunManager {
   // ---------- engine wiring ----------
 
   private wireEngine(id: string, engine: GeneticAlgorithmEngine<unknown>): void {
-    engine.on("generation", (stats) => {
+    const offs: (() => void)[] = [];
+    this.enginePorts.set(id, offs);
+    offs.push(engine.on("generation", (stats) => {
       this.store.updateGeneration(id, stats.generation);
       const buf = this.pendingStats.get(id) ?? [];
       buf.push(stats);
@@ -162,18 +228,18 @@ export class RunManager {
         this.pendingStats.set(id, buf);
       }
       this.broadcast(id, { type: "generation", runId: id, stats });
-    });
+    }));
 
-    engine.on("best", (generation, genome, fitness) => {
+    offs.push(engine.on("best", (generation, genome, fitness) => {
       this.broadcast(id, { type: "best", runId: id, generation, genome, fitness });
-    });
+    }));
 
-    engine.on("status", (status) => {
+    offs.push(engine.on("status", (status) => {
       this.store.setStatus(id, status);
       this.broadcast(id, { type: "status", runId: id, status });
-    });
+    }));
 
-    engine.on("finished", (reason, finalBest, generations) => {
+    offs.push(engine.on("finished", (reason, finalBest, generations) => {
       // Flush any buffered stats
       const buf = this.pendingStats.get(id);
       if (buf && buf.length > 0) {
@@ -193,13 +259,32 @@ export class RunManager {
         finalBestFitness: finalBest,
         generations,
       });
-    });
+    }));
 
-    engine.on("error", (err) => {
+    offs.push(engine.on("error", (err) => {
       this.store.setStatus(id, "error");
       this.broadcast(id, { type: "status", runId: id, status: "error" });
       console.error(`[run ${id}] engine error:`, err);
-    });
+    }));
+  }
+
+  /**
+   * Note which contract this run will need workers for.
+   *
+   * Only queued evaluators need anyone: a local evaluator scores in-process,
+   * so a run using one is never waiting on a worker and must never be paused
+   * for the lack of one.
+   */
+  private recordRequirement(id: string, config: RunConfig): void {
+    const ref = config.evaluator;
+    if (!ref) return;
+    const instance = this.registry.create("evaluator", ref.id, ref.params);
+    if (instance instanceof QueuedEvaluator) {
+      this.requirements.set(id, {
+        contract: instance.contract,
+        version: instance.version,
+      });
+    }
   }
 
   private require(id: string): GeneticAlgorithmEngine<unknown> {

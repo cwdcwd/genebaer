@@ -110,10 +110,21 @@ export class RunStore {
     this.insertRunStmt().run(id, JSON.stringify(config), "pending", Date.now());
   }
 
-  setStatus(id: string, status: RunStatus): void {
+  /**
+   * Set a run's status, optionally recording why.
+   *
+   * `stop_reason` doubles as the reason a run is *currently* paused, not only
+   * why it ended. Passing null clears it — a run that resumes should not keep
+   * explaining a condition that no longer holds.
+   */
+  setStatus(id: string, status: RunStatus, reason?: string | null): void {
+    if (reason === undefined) {
+      this.db.prepare("UPDATE runs SET status = ? WHERE id = ?").run(status, id);
+      return;
+    }
     this.db
-      .prepare("UPDATE runs SET status = ? WHERE id = ?")
-      .run(status, id);
+      .prepare("UPDATE runs SET status = ?, stop_reason = ? WHERE id = ?")
+      .run(status, reason, id);
   }
 
   /**

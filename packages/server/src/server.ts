@@ -50,6 +50,10 @@ export interface ServerOptions {
   dbPath?: string;
   /** How long a worker claim is valid before re-dispatch. */
   leaseMs?: number;
+  /** How often to sweep leases and re-check worker capacity. */
+  superviseMs?: number;
+  /** How long a worker may go unheard-from before it is reaped. */
+  maxWorkerSilenceMs?: number;
   registry?: OperatorRegistry;
   logger?: boolean;
 }
@@ -155,10 +159,30 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     return { ok: true };
   });
 
+  // A run whose contract nobody serves must not sit "running" forever, so the
+  // supervisor runs on a timer rather than only on worker events.
+  const supervisor = setInterval(() => {
+    jobQueue.expireLeases();
+    for (const dead of workerRegistry.reapStale(opts.maxWorkerSilenceMs ?? 60_000)) {
+      jobQueue.releaseWorker(dead);
+    }
+    runManager.superviseWorkerCapacity(workerRegistry);
+  }, opts.superviseMs ?? 250);
+  // Never hold the process open just for supervision.
+  supervisor.unref();
+
   registerWorkerRoutes(app, {
     queue: jobQueue,
     registry: workerRegistry,
     ...(opts.leaseMs === undefined ? {} : { leaseMs: opts.leaseMs }),
+  });
+
+  // Registering a worker may unblock a paused run, so react immediately
+  // rather than waiting up to a full supervision tick.
+  app.addHook("onResponse", async (req) => {
+    if (req.url === "/api/workers/register") {
+      runManager.superviseWorkerCapacity(workerRegistry);
+    }
   });
 
   // ---------- WebSocket ----------
@@ -199,6 +223,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
 
   app.addHook("onClose", async () => {
     // Order matters: halt the engines before closing the database they write to.
+    clearInterval(supervisor);
     runManager.shutdown();
     jobQueue.cancelAll("Server is shutting down");
     setActiveQueue(null);
