@@ -32,9 +32,26 @@ export function getActiveQueue(): JobQueue | null {
  * makes server threads and browser tabs interchangeable.
  */
 export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
+  /**
+   * Contract version. Bump it whenever the meaning of the score changes —
+   * a different model, different preprocessing, different normalisation.
+   * Scores across versions are not comparable, so this keeps a v1 worker from
+   * ever being handed a v2 job.
+   */
+  static readonly version: string = "1";
+
   /** The contract id workers must advertise to be offered these jobs. */
   get contract(): string {
     return (this.constructor as typeof BaseOperator).operatorId;
+  }
+
+  get version(): string {
+    return (this.constructor as typeof QueuedEvaluator).version;
+  }
+
+  /** Full identity: what a score means, and therefore what it caches under. */
+  get identity(): string {
+    return `${this.contract}@${this.version}`;
   }
 
   override evaluateBatch(
@@ -45,11 +62,11 @@ export abstract class QueuedEvaluator extends FitnessEvaluator<unknown> {
     if (!queue) {
       return Promise.reject(
         new Error(
-          `Evaluator '${this.contract}' needs a job queue, but none is active. ` +
+          `Evaluator '${this.identity}' needs a job queue, but none is active. ` +
             `Queued evaluators only work inside a running server.`,
         ),
       );
     }
-    return queue.submit(this.contract, this.params, genomes);
+    return queue.submit(this.contract, this.version, this.params, genomes);
   }
 }

@@ -15,6 +15,8 @@ import type { OperatorRegistry } from "@genebaer/core";
 import { RunManager, RunNotFoundError } from "./run-manager.js";
 import { JobQueue } from "./eval/job-queue.js";
 import { setActiveQueue } from "./eval/queued-evaluator.js";
+import { WorkerRegistry } from "./eval/worker-registry.js";
+import { registerWorkerRoutes } from "./eval/worker-routes.js";
 import { RunStore } from "./db/run-store.js";
 
 const runConfigSchema = z.object({
@@ -45,6 +47,8 @@ const controlSchema = z.object({
 
 export interface ServerOptions {
   dbPath?: string;
+  /** How long a worker claim is valid before re-dispatch. */
+  leaseMs?: number;
   registry?: OperatorRegistry;
   logger?: boolean;
 }
@@ -54,6 +58,7 @@ export interface GenebaerServer {
   runManager: RunManager;
   store: RunStore;
   jobQueue: JobQueue;
+  workerRegistry: WorkerRegistry;
   listen: FastifyInstance["listen"];
   close: FastifyInstance["close"];
 }
@@ -65,6 +70,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   // Queued evaluators resolve their queue from module scope, because the
   // registry constructs operators with params only and cannot inject services.
   const jobQueue = new JobQueue();
+  const workerRegistry = new WorkerRegistry();
   setActiveQueue(jobQueue);
 
   const app = Fastify({ logger: opts.logger ?? false });
@@ -143,6 +149,12 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     return { ok: true };
   });
 
+  registerWorkerRoutes(app, {
+    queue: jobQueue,
+    registry: workerRegistry,
+    ...(opts.leaseMs === undefined ? {} : { leaseMs: opts.leaseMs }),
+  });
+
   // ---------- WebSocket ----------
 
   app.register(async function wsRoutes(fastify) {
@@ -192,6 +204,7 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     runManager,
     store,
     jobQueue,
+    workerRegistry,
     listen: app.listen.bind(app),
     close: app.close.bind(app),
   };

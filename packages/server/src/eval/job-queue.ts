@@ -12,6 +12,12 @@ export interface EvalJob {
   readonly genome: unknown;
   /** Scoring contract this job needs, e.g. "clip-similarity". */
   readonly evaluatorId: string;
+  /**
+   * Contract version. Part of matching, not decoration: scores from two
+   * model versions are not comparable, so a v1 worker must never be handed a
+   * v2 job.
+   */
+  readonly evaluatorVersion: string;
   /** Evaluator params, e.g. the prompt. Part of what a worker needs. */
   readonly params: Record<string, unknown>;
 }
@@ -76,6 +82,7 @@ export class JobQueue {
    */
   submit(
     evaluatorId: string,
+    evaluatorVersion: string,
     params: Record<string, unknown>,
     genomes: readonly unknown[],
   ): Promise<number[]> {
@@ -101,6 +108,7 @@ export class JobQueue {
           index,
           genome: genomes[index],
           evaluatorId,
+          evaluatorVersion,
           params,
         });
       }
@@ -110,8 +118,9 @@ export class JobQueue {
   /**
    * Take up to `max` jobs a worker can serve.
    *
-   * Only jobs whose evaluatorId the worker advertised are offered, so a
-   * CLIP worker is never handed a job it cannot score.
+   * Capabilities are `evaluatorId@version` strings. Matching on the pair,
+   * not the id alone, is what stops a v1 worker being handed a v2 job whose
+   * score would not be comparable with the rest of the generation.
    */
   claim(capabilities: readonly string[], max: number): EvalJob[] {
     if (max <= 0) return [];
@@ -119,7 +128,8 @@ export class JobQueue {
     const taken: EvalJob[] = [];
     for (let i = 0; i < this.pending.length && taken.length < max; ) {
       const job = this.pending[i] as EvalJob;
-      if (able.has(job.evaluatorId) && this.evaluations.has(job.evaluationId)) {
+      const key = `${job.evaluatorId}@${job.evaluatorVersion}`;
+      if (able.has(key) && this.evaluations.has(job.evaluationId)) {
         taken.push(job);
         this.pending.splice(i, 1);
       } else {

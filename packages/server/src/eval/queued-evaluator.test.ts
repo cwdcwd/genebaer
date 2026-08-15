@@ -62,7 +62,7 @@ describe("QueuedEvaluator", () => {
 
     // Stand in for a worker: drain the queue and score with the real problem.
     const worker = setInterval(() => {
-      for (const job of queue.claim(["test-contract"], 4)) {
+      for (const job of queue.claim(["test-contract@1"], 4)) {
         queue.submitScore(job.evaluationId, job.index, problem.evaluate(job.genome));
       }
     }, 1);
@@ -90,7 +90,7 @@ describe("QueuedEvaluator", () => {
     const engine = new GeneticAlgorithmEngine<number[]>(config(), registry);
 
     const worker = setInterval(() => {
-      const jobs = queue.claim(["test-contract"], 1);
+      const jobs = queue.claim(["test-contract@1"], 1);
       if (jobs.length > 0) {
         queue.failEvaluation(jobs[0]!.evaluationId, new Error("worker cannot score this"));
       }
@@ -117,7 +117,7 @@ describe("QueuedEvaluator", () => {
     });
 
     expect(queue.stats()).toEqual({ pending: 3, openEvaluations: 1, activeLeases: 0, expiredLeases: 0 });
-    const jobs = queue.claim(["test-contract"], 10);
+    const jobs = queue.claim(["test-contract@1"], 10);
     expect(jobs.map((j) => j.index).sort()).toEqual([0, 1, 2]);
     for (const job of jobs) queue.submitScore(job.evaluationId, job.index, job.index);
     await expect(pending).resolves.toEqual([0, 1, 2]);
