@@ -17,6 +17,8 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { DiversityChart, FitnessChart } from "@/components/fitness-chart";
 import { ProblemVisual } from "@/components/visualizers";
 import { Annotations } from "@/components/annotations";
+import { EvalDiagnostics } from "@/components/eval-diagnostics";
+import { api as apiClient } from "@/lib/api";
 
 export default function RunDetailPage({
   params,
@@ -212,6 +214,35 @@ export default function RunDetailPage({
               </span>
             </CardHeader>
             <ProblemVisual problemId={detail.config.problem.id} data={visualData} />
+            {detail.config.problem.id === "image-prompt" && (
+              <a
+                href={apiClient.imageUrl(detail.id)}
+                download
+                className="mt-2 inline-block text-xs text-accent hover:underline"
+              >
+                ⬇ Download PNG
+              </a>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Evaluation</CardTitle>
+            </CardHeader>
+            <EvalDiagnostics />
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>What the model sees</CardTitle>
+              {stream.annotations.length > 0 && (
+                <span className="mono text-[10px] text-muted">
+                  {stream.annotations.length} caption
+                  {stream.annotations.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </CardHeader>
+            <Annotations annotations={stream.annotations} />
           </Card>
 
           <Card>
