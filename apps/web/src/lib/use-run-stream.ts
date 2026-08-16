@@ -21,15 +21,29 @@ export interface StreamFinished {
   generations: number;
 }
 
+export interface RunAnnotation {
+  generation: number;
+  kind: "caption";
+  text: string;
+}
+
 export interface RunStream {
   stats: GenerationStats[];
   status: RunStatus | null;
   lastBest: StreamBest | null;
   finished: StreamFinished | null;
   connected: boolean;
+  /**
+   * Human-readable notes about generations - currently VLM captions of the
+   * best genome. Newest first, and capped: they are a progress check, not a
+   * log, and an unbounded list would grow for the life of a run.
+   */
+  annotations: RunAnnotation[];
 }
 
 const MAX_RECONNECT_ATTEMPTS = 5;
+/** Captions are a progress check, not a log. Keep the recent ones only. */
+const MAX_ANNOTATIONS = 20;
 
 /**
  * Subscribe to the live event stream for one run. Opens a single WebSocket,
@@ -42,6 +56,7 @@ export function useRunStream(runId: string | null): RunStream {
   const [lastBest, setLastBest] = useState<StreamBest | null>(null);
   const [finished, setFinished] = useState<StreamFinished | null>(null);
   const [connected, setConnected] = useState(false);
+  const [annotations, setAnnotations] = useState<RunAnnotation[]>([]);
 
   // Keep finished in a ref so reconnect logic can see it without re-running effects.
   const finishedRef = useRef<StreamFinished | null>(null);
@@ -93,6 +108,18 @@ export function useRunStream(runId: string | null): RunStream {
           case "status":
             setStatus(msg.status);
             break;
+          case "annotation":
+            setAnnotations((prev) => {
+              // Ignore a repeat for a generation already annotated, so a
+              // reconnect cannot duplicate entries.
+              if (prev.some((a) => a.generation === msg.generation)) return prev;
+              const next = [
+                { generation: msg.generation, kind: msg.kind, text: msg.text },
+                ...prev,
+              ];
+              return next.slice(0, MAX_ANNOTATIONS);
+            });
+            break;
           case "finished":
             setFinished({
               reason: msg.reason,
@@ -133,5 +160,5 @@ export function useRunStream(runId: string | null): RunStream {
     };
   }, [runId]);
 
-  return { stats, status, lastBest, finished, connected };
+  return { stats, status, lastBest, finished, connected, annotations };
 }
