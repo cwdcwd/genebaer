@@ -6,7 +6,12 @@ import {
   genomeLengthFor,
   rgbToBits,
 } from "./image-genome.js";
-import { ImagePrompt, encodingParamsFor } from "./image-prompt.js";
+import {
+  ImagePrompt,
+  MIN_PIXELS_PER_POLYGON,
+  encodingParamsFor,
+  polygonEncodingParams,
+} from "./image-prompt.js";
 
 describe("bit-string <-> RGB", () => {
   it("needs exactly width * height * 24 bits", () => {
@@ -48,20 +53,39 @@ describe("bit-string <-> RGB", () => {
 });
 
 describe("ImagePrompt operator", () => {
-  it("registers as a problem and exposes a prompt param for the auto form", () => {
+  it("registers as a problem and exposes its params for the auto form", () => {
     const registry = createDefaultRegistry().register("problem", ImagePrompt);
     const meta = registry.listMetadata("problem").find((m) => m.id === "image-prompt");
     expect(meta).toBeDefined();
-    expect(Object.keys(meta!.paramsSchema).sort()).toEqual(["height", "prompt", "width"]);
+    expect(Object.keys(meta!.paramsSchema).sort()).toEqual([
+      "height",
+      "polygons",
+      "prompt",
+      "representation",
+      "width",
+    ]);
     expect(meta!.paramsSchema["prompt"]?.type).toBe("string");
-    // Reuses the existing binary encoding — no new operators required.
-    expect(meta!.compatibleEncodings).toEqual(["binary"]);
+    // The form must offer the choice, or the constrained representation is
+    // unreachable from the UI and this whole change is theoretical.
+    const rep = meta!.paramsSchema["representation"];
+    expect(rep?.type === "string" && rep.enum).toEqual(["polygons", "bits"]);
+    // Both representations reuse existing encodings — no new operators.
+    expect(meta!.compatibleEncodings).toEqual(["numeric", "binary"]);
   });
 
-  it("reports the genome length its configured size needs", () => {
-    const problem = new ImagePrompt({ width: 16, height: 8 });
+  it("reports the genome length its configured size needs under bits", () => {
+    const problem = new ImagePrompt({ representation: "bits", width: 16, height: 8 });
     expect(problem.genomeLength).toBe(16 * 8 * 24);
     expect(encodingParamsFor(problem.shape)).toEqual({ length: 16 * 8 * 24 });
+  });
+
+  it("sizes a polygon genome by polygon count, not by canvas", () => {
+    const small = new ImagePrompt({ width: 16, height: 16, polygons: 10 });
+    const large = new ImagePrompt({ width: 256, height: 256, polygons: 10 });
+    // The decisive property: raster size no longer drives search difficulty.
+    expect(small.genomeLength).toBe(100);
+    expect(large.genomeLength).toBe(100);
+    expect(polygonEncodingParams(10)).toEqual({ dimensions: 100, min: 0, max: 1 });
   });
 
   it("refuses non-integer or non-positive dimensions", () => {
@@ -69,10 +93,36 @@ describe("ImagePrompt operator", () => {
     expect(() => new ImagePrompt({ width: 8.5, height: 8 })).toThrow(/positive integers/);
   });
 
-  it("falls back to defaults for missing params", () => {
+  it("refuses an unknown representation rather than quietly picking one", () => {
+    // A silent fallback would report a genome length for a representation the
+    // caller did not ask for; the mismatch would surface much later as a
+    // confusing encoding error.
+    expect(() => new ImagePrompt({ representation: "svg" })).toThrow(
+      /must be 'polygons' or 'bits'/,
+    );
+    expect(() => new ImagePrompt({ polygons: 0 })).toThrow(/positive integer/);
+  });
+
+  it("defaults to the constrained representation, in its constrained regime", () => {
     const problem = new ImagePrompt();
-    expect(problem.shape).toEqual({ width: 32, height: 32 });
+    expect(problem.representation).toBe("polygons");
+    expect(problem.shape).toEqual({ width: 64, height: 64 });
     expect(problem.prompt).toBe("");
+    // The guard that caught a bad default: polygons alone do not constrain
+    // anything if there are enough of them to paint pixels.
+    expect(problem.pixelsPerPolygon).toBeGreaterThanOrEqual(MIN_PIXELS_PER_POLYGON);
+    expect(problem.constraintIsWeak).toBe(false);
+  });
+
+  it("reports a dense configuration as weak instead of pretending it is safe", () => {
+    // A caller may legitimately want a detailed image and accept the exposure.
+    // Claiming the constraint holds when it does not is the failure worth
+    // avoiding.
+    const dense = new ImagePrompt({ width: 32, height: 32, polygons: 48 });
+    expect(dense.pixelsPerPolygon).toBeCloseTo(21.3, 1);
+    expect(dense.constraintIsWeak).toBe(true);
+    // Bits are unconstrained by construction, so the ratio does not apply.
+    expect(new ImagePrompt({ representation: "bits" }).constraintIsWeak).toBe(false);
   });
 
   it("throws a directive error when scored in-process", () => {
@@ -83,16 +133,41 @@ describe("ImagePrompt operator", () => {
     expect(() => problem.evaluate([])).toThrow(/clip-similarity/);
   });
 
-  it("renders a genome to raw RGB bytes of the right size", () => {
-    const problem = new ImagePrompt({ width: 4, height: 4 });
+  it("renders a bits genome to raw RGB bytes of the right size", () => {
+    const problem = new ImagePrompt({ representation: "bits", width: 4, height: 4 });
     const genome = new Array<number>(problem.genomeLength).fill(1);
     const rgb = problem.render(genome);
     expect(rgb).toHaveLength(4 * 4 * 3);
     expect([...new Set(rgb)]).toEqual([255]);
   });
 
+  it("renders a polygon genome at the canvas size, not the genome size", () => {
+    const problem = new ImagePrompt({ width: 8, height: 4, polygons: 2 });
+    const rgb = problem.render(new Array<number>(problem.genomeLength).fill(0.5));
+    expect(rgb).toHaveLength(8 * 4 * 3);
+  });
+
+  it("rejects a wrong-sized polygon genome as loudly as a wrong-sized bit one", () => {
+    // The rasteriser tolerates any length by design — it reads whole polygons
+    // and drops a ragged tail. Left unchecked here, an encoding configured with
+    // the wrong dimensions would render a partial image and score it, and
+    // nothing would report a problem. Bits already throw; these must match.
+    const problem = new ImagePrompt({ width: 8, height: 8, polygons: 4 });
+    expect(() => problem.render(new Array<number>(30).fill(0.5))).toThrow(
+      /needs exactly 40 genes, got 30/,
+    );
+    expect(() =>
+      new ImagePrompt({ representation: "bits", width: 8, height: 8 }).render([1, 0]),
+    ).toThrow();
+  });
+
   it("produces a JSON-serialisable visual frame the canvas can draw", () => {
-    const problem = new ImagePrompt({ width: 2, height: 2, prompt: "a cat" });
+    const problem = new ImagePrompt({
+      representation: "bits",
+      width: 2,
+      height: 2,
+      prompt: "a cat",
+    });
     const genome = new Array<number>(problem.genomeLength).fill(0);
     const frame = problem.visualize(genome);
 

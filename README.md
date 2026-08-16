@@ -94,9 +94,21 @@ See `packages/shared-types/src/index.ts` for both.
 
 ### `@genebaer/vision` — image genome, image problem, PNG
 
-Raw pixel bit-string genomes (reusing the existing `binary` encoding and
-`bit-flip` mutation unchanged), the `image-prompt` problem, and a
-dependency-free PNG encoder built on Node's `zlib`.
+The `image-prompt` problem in two representations, both reusing existing
+encodings and operators unchanged:
+
+- **`polygons`** (default) — translucent triangles over `numeric` + `gaussian`.
+  Genome size is set by polygon count, not by canvas size.
+- **`bits`** — raw pixel bit strings over `binary` + `bit-flip`.
+
+`bits` is the obvious encoding and the wrong default: measured against real
+CLIP, it optimises into adversarial noise scoring 50% above a photograph of the
+subject. Polygons cannot express that noise. See
+[docs/experiments/polygon-constraint.md](docs/experiments/polygon-constraint.md)
+— including the measurement that the defence is a *ratio* of pixels to polygons
+and degrades as they approach each other.
+
+Plus a dependency-free PNG encoder built on Node's `zlib`.
 
 ### `apps/web` — Next.js 15 visualizer
 

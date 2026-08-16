@@ -1,6 +1,6 @@
 import type { RunConfig, WsServerMessage } from "@genebaer/shared-types";
 import { createDefaultRegistry } from "@genebaer/core";
-import { ImagePrompt, encodingParamsFor } from "@genebaer/vision";
+import { ImagePrompt, polygonEncodingParams } from "@genebaer/vision";
 import { afterEach, describe, expect, it } from "vitest";
 import { CaptionQueue } from "./caption-queue.js";
 import { QueuedEvaluator, setActiveQueue } from "./queued-evaluator.js";
@@ -27,7 +27,8 @@ afterEach(async () => {
   setActiveQueue(null);
 });
 
-const SHAPE = { width: 4, height: 4 };
+const SHAPE = { width: 8, height: 8 };
+const POLYGONS = 3;
 
 function imageConfig(captionEvery?: number): RunConfig {
   return {
@@ -35,14 +36,15 @@ function imageConfig(captionEvery?: number): RunConfig {
       id: "image-prompt",
       params: {
         ...SHAPE,
+        polygons: POLYGONS,
         prompt: "a red circle",
         ...(captionEvery === undefined ? {} : { captionEvery }),
       },
     },
-    encoding: { id: "binary", params: encodingParamsFor(SHAPE) },
+    encoding: { id: "numeric", params: polygonEncodingParams(POLYGONS) },
     selection: { id: "tournament" },
     crossover: { id: "one-point" },
-    mutation: { id: "bit-flip" },
+    mutation: { id: "gaussian" },
     mutationRate: 0.01,
     populationSize: 4,
     elitism: 1,
