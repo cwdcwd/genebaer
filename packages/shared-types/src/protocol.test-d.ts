@@ -272,3 +272,35 @@ describe("annotations", () => {
     assertType<WsServerMessage>({ type: "annotation", runId: "r", generation: 1, kind: "caption" });
   });
 });
+
+describe("OperatorMeta.version", () => {
+  it("is optional, because only evaluators carry a contract version", () => {
+    assertType<OperatorMeta>({
+      id: "one-max",
+      kind: "problem",
+      displayName: "OneMax",
+      description: "d",
+      paramsSchema: {},
+    });
+  });
+
+  it("is a string when present, so a worker can register with it verbatim", () => {
+    assertType<OperatorMeta>({
+      id: "clip-similarity",
+      kind: "evaluator",
+      displayName: "CLIP",
+      description: "d",
+      paramsSchema: {},
+      version: "clip-vit-base-patch32.2",
+    });
+    const base = {
+      id: "clip-similarity",
+      kind: "evaluator" as const,
+      displayName: "CLIP",
+      description: "d",
+      paramsSchema: {},
+    };
+    // @ts-expect-error a version is a contract string, never a number
+    assertType<OperatorMeta>({ ...base, version: 2 });
+  });
+});
