@@ -18,6 +18,7 @@ import { DiversityChart, FitnessChart } from "@/components/fitness-chart";
 import { ProblemVisual } from "@/components/visualizers";
 import { Annotations } from "@/components/annotations";
 import { EvalDiagnostics } from "@/components/eval-diagnostics";
+import { WorkerPanel } from "@/components/worker-panel";
 import { api as apiClient } from "@/lib/api";
 
 export default function RunDetailPage({
@@ -230,6 +231,13 @@ export default function RunDetailPage({
               <CardTitle>Evaluation</CardTitle>
             </CardHeader>
             <EvalDiagnostics />
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>This browser</CardTitle>
+            </CardHeader>
+            <WorkerPanel />
           </Card>
 
           <Card>
