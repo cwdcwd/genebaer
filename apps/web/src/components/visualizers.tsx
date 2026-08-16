@@ -291,6 +291,94 @@ function isNumberArray(v: unknown): v is number[] {
   return Array.isArray(v) && v.every((x) => typeof x === "number");
 }
 
+/* ------------------------------------------------------------------ */
+/* image-prompt — the evolved image itself                             */
+/* ------------------------------------------------------------------ */
+
+export interface ImageFrame {
+  width: number;
+  height: number;
+  channels: number;
+  prompt?: string;
+  /** Raw RGB bytes, width * height * 3. */
+  rgb: number[];
+}
+
+/** True when a frame's byte count matches the dimensions it declares. */
+export function isImageFrame(data: unknown): data is ImageFrame {
+  if (typeof data !== "object" || data === null) return false;
+  const f = data as Partial<ImageFrame>;
+  if (!Number.isInteger(f.width) || !Number.isInteger(f.height)) return false;
+  if ((f.width ?? 0) < 1 || (f.height ?? 0) < 1) return false;
+  if (!Array.isArray(f.rgb)) return false;
+  // A mismatch would render a skewed or truncated image that still looks
+  // plausible, which is worse than rendering nothing.
+  return f.rgb.length === (f.width ?? 0) * (f.height ?? 0) * 3;
+}
+
+/**
+ * Pack RGB bytes into the RGBA buffer a canvas wants, opaque throughout.
+ *
+ * Pure and exported so it can actually be tested: jsdom does not implement
+ * `getContext`, so a test that only mounts the component proves it did not
+ * crash and nothing more. This is where the pixels are actually decided.
+ */
+export function toRgba(frame: ImageFrame): Uint8ClampedArray {
+  const pixels = frame.width * frame.height;
+  const out = new Uint8ClampedArray(pixels * 4);
+  for (let i = 0; i < pixels; i++) {
+    out[i * 4] = frame.rgb[i * 3] ?? 0;
+    out[i * 4 + 1] = frame.rgb[i * 3 + 1] ?? 0;
+    out[i * 4 + 2] = frame.rgb[i * 3 + 2] ?? 0;
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+}
+
+/** Letterboxed placement, so a non-square genome is never stretched. */
+export function fitRect(
+  frame: { width: number; height: number },
+  boxW: number,
+  boxH: number,
+): { x: number; y: number; width: number; height: number } {
+  const scale = Math.min(boxW / frame.width, boxH / frame.height);
+  const width = frame.width * scale;
+  const height = frame.height * scale;
+  return { x: (boxW - width) / 2, y: (boxH - height) / 2, width, height };
+}
+
+export function ImageVisual({ frame }: { frame: ImageFrame }) {
+  return (
+    <Canvas
+      height={280}
+      deps={[frame.width, frame.height, frame.rgb]}
+      draw={(ctx, width, height) => {
+        ctx.clearRect(0, 0, width, height);
+
+        // Build the image at its true size, then blit it scaled. Drawing
+        // pixel-by-pixel at display size would blur genome structure away.
+        const source = ctx.createImageData(frame.width, frame.height);
+        source.data.set(toRgba(frame));
+
+        // Letterbox to preserve aspect ratio; a stretched genome misleads.
+        const box = fitRect(frame, width, height);
+
+        const offscreen = document.createElement("canvas");
+        offscreen.width = frame.width;
+        offscreen.height = frame.height;
+        const octx = offscreen.getContext("2d");
+        if (!octx) return;
+        octx.putImageData(source, 0, 0);
+
+        // Nearest-neighbour: at 32x32 the individual genes ARE the content,
+        // and smoothing would hide exactly what the run is doing.
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(offscreen, box.x, box.y, box.width, box.height);
+      }}
+    />
+  );
+}
+
 export function ProblemVisual({
   problemId,
   data,
@@ -307,6 +395,14 @@ export function ProblemVisual({
   }
 
   switch (problemId) {
+    case "image-prompt":
+      // A frame whose byte count does not match its dimensions renders nothing
+      // rather than a skewed image that still looks plausible.
+      return isImageFrame(data) ? (
+        <ImageVisual frame={data} />
+      ) : (
+        <FallbackVisual data={data} />
+      );
     case "one-max":
       return isNumberArray(data) ? (
         <OneMaxVisual bits={data} />
