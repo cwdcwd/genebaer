@@ -18,6 +18,7 @@ import { DiversityChart, FitnessChart } from "@/components/fitness-chart";
 import { ProblemVisual } from "@/components/visualizers";
 import { Annotations } from "@/components/annotations";
 import { EvalDiagnostics } from "@/components/eval-diagnostics";
+import { WorkerPanel } from "@/components/worker-panel";
 import { api as apiClient } from "@/lib/api";
 
 export default function RunDetailPage({
@@ -234,15 +235,9 @@ export default function RunDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>What the model sees</CardTitle>
-              {stream.annotations.length > 0 && (
-                <span className="mono text-[10px] text-muted">
-                  {stream.annotations.length} caption
-                  {stream.annotations.length === 1 ? "" : "s"}
-                </span>
-              )}
+              <CardTitle>This browser</CardTitle>
             </CardHeader>
-            <Annotations annotations={stream.annotations} />
+            <WorkerPanel />
           </Card>
 
           <Card>
