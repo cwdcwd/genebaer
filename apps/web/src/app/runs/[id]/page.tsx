@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { DiversityChart, FitnessChart } from "@/components/fitness-chart";
 import { ProblemVisual } from "@/components/visualizers";
+import { Annotations } from "@/components/annotations";
 
 export default function RunDetailPage({
   params,
@@ -211,6 +212,19 @@ export default function RunDetailPage({
               </span>
             </CardHeader>
             <ProblemVisual problemId={detail.config.problem.id} data={visualData} />
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>What the model sees</CardTitle>
+              {stream.annotations.length > 0 && (
+                <span className="mono text-[10px] text-muted">
+                  {stream.annotations.length} caption
+                  {stream.annotations.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </CardHeader>
+            <Annotations annotations={stream.annotations} />
           </Card>
 
           <Card>
