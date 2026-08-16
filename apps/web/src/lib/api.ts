@@ -48,6 +48,38 @@ export const api = {
     }),
   getVisual: (id: string) =>
     request<{ problemId: string; data: unknown }>(`/api/runs/${id}/visual`),
+  /** Diagnostics for a run that is not advancing. */
+  evalStats: () => request<EvalStats>("/api/eval/stats"),
+  /** Direct link, not a fetch: the browser downloads it. */
+  imageUrl: (id: string) => `${API_URL}/api/runs/${id}/image.png`,
   deleteRun: (id: string) =>
     request<{ ok: true }>(`/api/runs/${id}`, { method: "DELETE" }),
 };
+
+/** Shape of GET /api/eval/stats. */
+export interface EvalStats {
+  queue: {
+    pending: number;
+    openEvaluations: number;
+    activeLeases: number;
+    expiredLeases: number;
+  };
+  cache: { hits: number; misses: number; dedupedInBatch: number } | null;
+  workers: {
+    workerId: string;
+    kind: string;
+    capabilities: { evaluatorId: string; version: string }[];
+    lastSeen: number;
+  }[];
+  blockers: {
+    evaluationId: string;
+    contract: string;
+    remaining: number;
+    unclaimed: number;
+    queueWaitMs: number;
+    scoringMs: number;
+    heldBy: string[];
+    /** False means nothing connected can score this — the usual cause of a stall. */
+    servable: boolean;
+  }[];
+}
