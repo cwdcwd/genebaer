@@ -114,7 +114,13 @@ effect on the adversarial score is not yet, and that doc says so plainly.
 **2. Score under augmentation.** Adversarial patterns are brittle: they stop
 working under random crops, flips, and resizes. Scoring the mean CLIP similarity
 over N random augmentations of the same image is the standard defence in
-CLIP-guided generation, and costs N× inference. Tracked as **genebaer-6kh**.
+CLIP-guided generation, and costs N× inference. Tracked as **genebaer-6kh**,
+and now measured — see
+[Does augmented scoring blunt adversarial exploitation?](./augmented-clip-scoring.md).
+It works: the adversarial image loses 21% of its score under augmentation while
+a real photograph loses 1.6%. It is not a cure. Optimising the augmented
+objective directly finds a weaker exploit, and only both levers together bring
+the margin over a photograph down to 7%.
 
 Neither is speculative — both address the measured failure directly, and either
 can be evaluated with the same random-search-baseline method used here.

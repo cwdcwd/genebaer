@@ -3,7 +3,7 @@
 export interface ClipImagePayload {
   width: number;
   height: number;
-  rgb: number[];
+  rgb: readonly number[] | Uint8Array | Uint8ClampedArray;
 }
 
 export interface ClipBackend {
@@ -17,8 +17,13 @@ export declare function cosineSimilarity(
   a: ArrayLike<number>,
   b: ArrayLike<number>,
 ): number;
+/**
+ * @param augmentations Mean similarity over this many random crops/flips.
+ *   1 (the default) is a single aligned view, i.e. no augmentation.
+ */
 export declare function scoreImageAgainstPrompt(
   payload: ClipImagePayload,
   prompt: string,
+  augmentations?: number,
 ): Promise<number>;
 export declare function textCacheSize(): number;

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EvalJobPayload } from "@genebaer/shared-types";
+import { augmentedViews } from "@genebaer/vision/augment";
 import {
   cosine,
   createClipScorer,
@@ -119,5 +120,78 @@ describe("createClipScorer", () => {
       Promise.reject(new Error("This browser has no WebGPU")),
     );
     await expect(score(job())).rejects.toThrow(/no WebGPU/);
+  });
+});
+
+describe("augmented scoring in the browser", () => {
+  /** Pipelines whose image embedding varies with the pixels, and that record them. */
+  function recordingPipelines(seen: number[][]): ClipPipelines {
+    return {
+      RawImage: class {
+        constructor(
+          public data: Uint8ClampedArray,
+          public width: number,
+          public height: number,
+          public channels: number,
+        ) {
+          seen.push([...data]);
+        }
+      },
+      processor: (image) => Promise.resolve(image),
+      visionModel: (input) => {
+        const img = input as { data: Uint8ClampedArray };
+        let sum = 0;
+        for (const v of img.data) sum += v;
+        return Promise.resolve({ image_embeds: { data: [sum / img.data.length, 1] } });
+      },
+      tokenizer: (text) => text,
+      textModel: () => Promise.resolve({ text_embeds: { data: [120, 1] } }),
+    };
+  }
+
+  /** Half white, half black, so a crop genuinely shifts the embedding. */
+  function halfJob(): EvalJobPayload {
+    const rgb = new Array<number>(8 * 8 * 3).fill(0);
+    for (let i = 0; i < rgb.length / 2; i++) rgb[i] = 255;
+    return job({ genome: { width: 8, height: 8, channels: 3, rgb } });
+  }
+
+  it("scores one aligned view when the param is absent", async () => {
+    const seen: number[][] = [];
+    const score = createClipScorer(() => Promise.resolve(recordingPipelines(seen)));
+    await score(halfJob());
+    expect(seen).toHaveLength(1);
+  });
+
+  it("embeds N views and averages them", async () => {
+    const seen: number[][] = [];
+    const score = createClipScorer(() => Promise.resolve(recordingPipelines(seen)));
+    const j = halfJob();
+    await score({ ...j, params: { ...j.params, augmentations: 6 } });
+    expect(seen).toHaveLength(6);
+    // The unmodified image is always first.
+    expect(seen[0]).toEqual((j.genome as { rgb: number[] }).rgb);
+  });
+
+  it("agrees with the server-side scorer, view for view", async () => {
+    // Both sides call the same augmentedViews with the same pixel-derived seed.
+    // If they diverged, a run's fitness would depend on which worker happened
+    // to claim the lease — the same genome scoring differently by luck.
+    const seen: number[][] = [];
+    const score = createClipScorer(() => Promise.resolve(recordingPipelines(seen)));
+    const j = halfJob();
+    await score({ ...j, params: { ...j.params, augmentations: 5 } });
+
+    const rgb = (j.genome as { rgb: number[] }).rgb;
+    const expected = augmentedViews({ width: 8, height: 8, rgb }, 5);
+    expect(seen).toEqual(expected.map((v) => [...v.rgb]));
+  });
+
+  it("rejects a bad count rather than silently scoring one view", async () => {
+    const score = createClipScorer(() => Promise.resolve(fakePipelines()));
+    const j = halfJob();
+    await expect(
+      score({ ...j, params: { ...j.params, augmentations: 0 } }),
+    ).rejects.toThrow(/positive integer/);
   });
 });

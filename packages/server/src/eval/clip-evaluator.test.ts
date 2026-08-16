@@ -1,6 +1,6 @@
 import type { FitnessProblem } from "@genebaer/core";
 import { ImagePrompt } from "@genebaer/vision";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { JobQueue } from "./job-queue.js";
 import { setActiveQueue } from "./queued-evaluator.js";
 import { MemoryScoreCache, setActiveScoreCache } from "./score-cache.js";
@@ -175,9 +175,122 @@ describe("CLIP backend", () => {
   it("fails loudly when no model is available, rather than substituting a signal", async () => {
     // A stand-in metric would look like it was working while steering the run
     // toward something unrelated to the prompt, and no gate would notice.
-    setClipBackend(null);
+    //
+    // The module is mocked as unavailable rather than merely left uninstalled.
+    // Without that, this test only asserted anything on a machine that happens
+    // to lack the optional dependency: install it — as any real CLIP worker
+    // must — and the test instead downloaded 150MB of weights and passed for
+    // the wrong reason.
+    vi.doMock("@huggingface/transformers", () => {
+      throw new Error("Cannot find package '@huggingface/transformers'");
+    });
+    vi.resetModules();
+    const fresh = await import("./clip-backend.mjs");
+    fresh.setClipBackend(null);
     await expect(
-      scoreImageAgainstPrompt({ width: 1, height: 1, rgb: [0] }, "a cat"),
+      fresh.scoreImageAgainstPrompt({ width: 1, height: 1, rgb: [0, 0, 0] }, "a cat"),
     ).rejects.toThrow(/@huggingface\/transformers|not installed/);
+    vi.doUnmock("@huggingface/transformers");
+    vi.resetModules();
+  });
+});
+
+describe("augmented scoring", () => {
+  /** A backend whose image embedding depends on the pixels it is given. */
+  function countingBackend() {
+    const seen: number[][] = [];
+    return {
+      seen,
+      backend: {
+        embedImage: ({ rgb }: { rgb: readonly number[] | Uint8Array | Uint8ClampedArray }) => {
+          seen.push([...rgb]);
+          // Embed the mean brightness, so a crop of a non-uniform image
+          // genuinely embeds differently from the original.
+          let sum = 0;
+          for (const v of rgb) sum += v;
+          return Promise.resolve(Float32Array.from([sum / rgb.length, 1]));
+        },
+        embedText: () => Promise.resolve(Float32Array.from([120, 1])),
+      },
+    };
+  }
+
+  /** Half black, half white — so a crop shifts the mean. */
+  function halfImage(width = 8, height = 8) {
+    const rgb = new Array<number>(width * height * 3).fill(0);
+    for (let i = 0; i < rgb.length / 2; i++) rgb[i] = 255;
+    return { width, height, channels: 3 as const, rgb };
+  }
+
+  it("defaults to one view, leaving existing runs measuring exactly what they did", () => {
+    const evaluator = new ClipSimilarityEvaluator();
+    expect(evaluator.augmentations).toBe(1);
+  });
+
+  it("embeds N views and returns their mean", async () => {
+    const { seen, backend } = countingBackend();
+    setClipBackend(backend);
+    const image = halfImage();
+
+    const single = await scoreImageAgainstPrompt(image, "a red circle", 1);
+    expect(seen).toHaveLength(1);
+
+    seen.length = 0;
+    const averaged = await scoreImageAgainstPrompt(image, "a red circle", 8);
+    expect(seen).toHaveLength(8);
+    // The unmodified image is always the first view.
+    expect(seen[0]).toEqual(image.rgb);
+    // Crops of a half-black image differ, so the mean must move.
+    expect(averaged).not.toBe(single);
+  });
+
+  it("scores a given image identically every time", async () => {
+    // Fitness must stay a function of the genome. Fresh randomness per call
+    // would make an individual re-score differently and let elitism carry a
+    // score its genome cannot reproduce.
+    const { backend } = countingBackend();
+    setClipBackend(backend);
+    const image = halfImage();
+    const a = await scoreImageAgainstPrompt(image, "a red circle", 8);
+    const b = await scoreImageAgainstPrompt(image, "a red circle", 8);
+    expect(a).toBe(b);
+  });
+
+  it("does not re-embed the prompt per view", async () => {
+    // N augmentations must cost N image embeddings, not N text ones too.
+    const { backend } = countingBackend();
+    setClipBackend(backend);
+    await scoreImageAgainstPrompt(halfImage(), "a red circle", 8);
+    expect(textCacheSize()).toBe(1);
+  });
+
+  it("puts the view count in the job params, so the cache cannot cross-serve", () => {
+    // A run at N=8 must never be handed a number measured at N=1.
+    const queue = new JobQueue();
+    setActiveQueue(queue);
+    const ctx = imageContext(4, 4);
+    const problem = ctx.problem as unknown as ImagePrompt;
+    const evaluator = new ClipSimilarityEvaluator({ augmentations: 8 });
+
+    void evaluator.evaluateBatch([whiteGenome(problem)], ctx);
+    const jobs = queue.claim([`clip-similarity@${evaluator.version}`], 10);
+    expect(jobs[0]?.params["augmentations"]).toBe(8);
+  });
+
+  it("bumps the version, because an old worker would ignore the param", () => {
+    // The cache keys on params, so N=1 and N=8 could never collide there. The
+    // real hazard is a worker running older code: it does not know the param
+    // exists and would return a single aligned score for a run that believes
+    // it is averaging eight views.
+    expect(new ClipSimilarityEvaluator().version).toBe("clip-vit-base-patch32.2");
+  });
+
+  it("rejects a bad count when the run is configured, not once per genome", () => {
+    expect(() => new ClipSimilarityEvaluator({ augmentations: 0 }).augmentations).toThrow(
+      /positive integer/,
+    );
+    expect(() => new ClipSimilarityEvaluator({ augmentations: 2.5 }).augmentations).toThrow(
+      /positive integer/,
+    );
   });
 });

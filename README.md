@@ -54,7 +54,7 @@ Every GA aspect is an abstract base class with a static `operatorId` + JSON Sche
 | `mutation`    | `bit-flip`, `gaussian`, `swap`, `char` |
 | `termination` | `max-generations`, `target-fitness`, `stagnation` |
 | `problem`     | `one-max`, `sphere`, `rastrigin`, `weasel`, `mds`, `image-prompt` |
-| `evaluator`   | `local` (in-process), `clip-similarity` (model-backed, distributed) |
+| `evaluator`   | `local` (in-process), `clip-similarity` (model-backed, distributed, optional augmented scoring) |
 
 `GeneticAlgorithmEngine` consumes a declarative `RunConfig` (JSON-serializable), resolves it via the registry, and exposes `start/pause/resume/step/stop` plus typed events (`generation`, `best`, `finished`, `status`, `error`). Runs are seeded (mulberry32) → same seed + config = identical run, PROVIDED the evaluator is deterministic. A model-backed evaluator is not; the score cache is what makes a replay exact. See docs/architecture.md.
 
@@ -108,7 +108,15 @@ subject. Polygons cannot express that noise. See
 — including the measurement that the defence is a *ratio* of pixels to polygons
 and degrades as they approach each other.
 
-Plus a dependency-free PNG encoder built on Node's `zlib`.
+Plus random-augmentation views for robust CLIP scoring (shared verbatim by the
+Node worker and the browser worker, so the same genome scores the same number
+whoever claims the job), and a dependency-free PNG encoder built on Node's
+`zlib`.
+
+Neither lever fully solves adversarial exploitation on its own, and both were
+measured rather than assumed:
+[polygon-constraint.md](docs/experiments/polygon-constraint.md),
+[augmented-clip-scoring.md](docs/experiments/augmented-clip-scoring.md).
 
 ### `apps/web` — Next.js 15 visualizer
 

@@ -1,4 +1,7 @@
 import type { EvalJobPayload } from "@genebaer/shared-types";
+// Subpath import on purpose: the package root re-exports the PNG encoder,
+// which imports node:zlib and has no place in a browser bundle.
+import { augmentedViews } from "@genebaer/vision/augment";
 
 /**
  * In-browser CLIP scoring on WebGPU.
@@ -148,8 +151,36 @@ export function createClipScorer(load: PipelineLoader = loadFromCdn) {
     }
 
     const { data, width, height } = payloadToPixels(job);
-    const image = new p.RawImage(data, width, height, 3);
-    const { image_embeds } = await p.visionModel(await p.processor(image));
-    return cosine(image_embeds.data, text);
+
+    // Mean similarity over N augmented views. Must match the server-side
+    // scorer exactly — both call the same `augmentedViews` from @genebaer/vision
+    // with the same pixel-derived seed, so a browser worker and a thread worker
+    // return the same number for the same job. If they diverged, a run's
+    // fitness would depend on which worker happened to claim the lease.
+    const views = augmentedViews({ width, height, rgb: data }, augmentationsFor(job));
+    let total = 0;
+    for (const view of views) {
+      const image = new p.RawImage(
+        Uint8ClampedArray.from(view.rgb),
+        view.width,
+        view.height,
+        3,
+      );
+      const { image_embeds } = await p.visionModel(await p.processor(image));
+      total += cosine(image_embeds.data, text);
+    }
+    return total / views.length;
   };
+}
+
+/** Augmented view count from the job params, defaulting to no augmentation. */
+export function augmentationsFor(job: EvalJobPayload): number {
+  const raw = job.params["augmentations"];
+  if (raw === undefined) return 1;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) {
+    throw new RangeError(
+      `clip-similarity: augmentations must be a positive integer, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
 }
