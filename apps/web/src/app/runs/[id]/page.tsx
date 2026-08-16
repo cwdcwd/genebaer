@@ -247,6 +247,19 @@ export default function RunDetailPage({
 
           <Card>
             <CardHeader>
+              <CardTitle>What the model sees</CardTitle>
+              {stream.annotations.length > 0 && (
+                <span className="mono text-[10px] text-muted">
+                  {stream.annotations.length} caption
+                  {stream.annotations.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </CardHeader>
+            <Annotations annotations={stream.annotations} />
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Best genome</CardTitle>
               {stream.lastBest && (
                 <span className="mono text-[10px] text-muted">
