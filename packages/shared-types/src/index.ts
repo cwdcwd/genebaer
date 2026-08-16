@@ -59,6 +59,14 @@ export interface OperatorMeta {
   paramsSchema: Record<string, JSONSchema>;
   /** Encoding ids this operator works with; absent/empty = encoding-agnostic. */
   compatibleEncodings?: string[];
+  /**
+   * For encodings: which param sets the genome size ("length", "dimensions").
+   *
+   * Lets a client size an encoding to a problem's requirement without a
+   * hardcoded per-encoding key map, which would go stale silently the moment
+   * someone adds an encoding.
+   */
+  sizeParam?: string;
 }
 
 // ---------- Run configuration ----------
@@ -147,6 +155,12 @@ export interface RunSummary {
 
 export interface CreateRunRequest {
   config: RunConfig;
+}
+
+/** Reply from POST /api/problems/:id/genome-length. */
+export interface GenomeLengthResponse {
+  /** Genes the problem needs, or null when any length works. */
+  genomeLength: number | null;
 }
 
 export interface CreateRunResponse {

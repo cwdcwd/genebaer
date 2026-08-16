@@ -25,4 +25,19 @@ export abstract class FitnessProblem<G = unknown> extends BaseOperator {
   visualize(_best: G): VisualFrame | null {
     return null;
   }
+
+  /**
+   * Genes this problem needs, when its params determine that exactly.
+   *
+   * `null` means any length works — OneMax and Sphere score a genome of
+   * whatever size the encoding produces. But Weasel needs one gene per target
+   * character, MDS one per vertex, and ImagePrompt a number set by its
+   * representation. For those, pairing the problem with a differently-sized
+   * encoding is a misconfiguration, and until this existed the UI had no way to
+   * know: it only ever saw JSON Schema, which cannot express "as long as the
+   * target string". See genebaer-7tu.
+   */
+  get requiredGenomeLength(): number | null {
+    return null;
+  }
 }

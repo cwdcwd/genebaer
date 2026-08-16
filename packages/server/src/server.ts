@@ -5,13 +5,14 @@ import type { WebSocket } from "ws";
 import { z } from "zod";
 import type {
   CreateRunResponse,
+  GenomeLengthResponse,
   OperatorMeta,
   RunDetail,
   RunSummary,
   WsClientMessage,
   WsServerMessage,
 } from "@genebaer/shared-types";
-import type { OperatorRegistry } from "@genebaer/core";
+import type { FitnessProblem, OperatorRegistry } from "@genebaer/core";
 import { RunManager, RunNotFoundError } from "./run-manager.js";
 import { JobQueue } from "./eval/job-queue.js";
 import { setActiveQueue } from "./eval/queued-evaluator.js";
@@ -45,6 +46,9 @@ const runConfigSchema = z.object({
 });
 
 const createRunSchema = z.object({ config: runConfigSchema });
+const genomeLengthSchema = z.object({
+  params: z.record(z.string(), z.unknown()).optional(),
+});
 const controlSchema = z.object({
   action: z.enum(["pause", "resume", "step", "stop"]),
 });
@@ -114,6 +118,43 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
   app.get("/api/problems", async (): Promise<OperatorMeta[]> => {
     return runManager.operatorRegistry.listMetadata("problem");
   });
+
+  /**
+   * How many genes a problem needs for a given set of params.
+   *
+   * The client cannot work this out: it only ever sees JSON Schema, which can
+   * describe a `target` string but not "one gene per character of it". So the
+   * problem is constructed here, where the real operator code lives, and asked.
+   *
+   * POST rather than GET because params are an arbitrary object, and a run's
+   * problem params can be large enough to be awkward in a query string.
+   */
+  app.post(
+    "/api/problems/:id/genome-length",
+    async (req, reply): Promise<GenomeLengthResponse> => {
+      const { id } = req.params as { id: string };
+      const parsed = genomeLengthSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() }) as never;
+      }
+      if (!runManager.operatorRegistry.has("problem", id)) {
+        return reply.code(404).send({ error: `Unknown problem '${id}'` }) as never;
+      }
+      try {
+        const problem = runManager.operatorRegistry.create<FitnessProblem<unknown>>(
+          "problem",
+          id,
+          parsed.data.params,
+        );
+        return { genomeLength: problem.requiredGenomeLength };
+      } catch (err) {
+        // Params the problem itself rejects (a negative width, say). This is a
+        // live preview of a form the user is still editing, so a half-typed
+        // value must read as "cannot size that yet", not as a server fault.
+        return reply.code(422).send({ error: (err as Error).message }) as never;
+      }
+    },
+  );
 
   app.post("/api/runs", async (req, reply): Promise<CreateRunResponse> => {
     const parsed = createRunSchema.safeParse(req.body);

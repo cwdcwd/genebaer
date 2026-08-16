@@ -390,3 +390,66 @@ describe("genebaer server", () => {
     expect(res.status).toBe(422);
   });
 });
+
+describe("POST /api/problems/:id/genome-length", () => {
+  it("reports the length a problem's params imply", async () => {
+    // genebaer-7tu: the client cannot derive this. JSON Schema can describe a
+    // `target` string but not "one gene per character of it".
+    const { baseUrl } = await bootServer();
+    const res = await fetch(`${baseUrl}/api/problems/weasel/genome-length`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ params: { target: "METHINKS" } }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ genomeLength: 8 });
+  });
+
+  it("tracks the params rather than returning a fixed number", async () => {
+    const { baseUrl } = await bootServer();
+    const ask = async (target: string) => {
+      const res = await fetch(`${baseUrl}/api/problems/weasel/genome-length`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ params: { target } }),
+      });
+      return ((await res.json()) as { genomeLength: number | null }).genomeLength;
+    };
+    expect(await ask("AB")).toBe(2);
+    expect(await ask("ABCDE")).toBe(5);
+  });
+
+  it("reports null where any genome length genuinely works", async () => {
+    // Claiming a requirement here would let the form overwrite a size the user
+    // chose deliberately.
+    const { baseUrl } = await bootServer();
+    const res = await fetch(`${baseUrl}/api/problems/one-max/genome-length`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ params: {} }),
+    });
+    expect(await res.json()).toEqual({ genomeLength: null });
+  });
+
+  it("404s an unknown problem instead of inventing a length", async () => {
+    const { baseUrl } = await bootServer();
+    const res = await fetch(`${baseUrl}/api/problems/not-a-problem/genome-length`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ params: {} }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("422s params the problem itself rejects", async () => {
+    // The form calls this while the user is still typing, so a half-entered
+    // value must read as "cannot size that yet", not as a server fault.
+    const { baseUrl } = await bootServer();
+    const res = await fetch(`${baseUrl}/api/problems/mds/genome-length`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ params: { graph: "not-a-graph" } }),
+    });
+    expect(res.status).toBe(422);
+  });
+});

@@ -1,5 +1,6 @@
 import type {
   CreateRunResponse,
+  GenomeLengthResponse,
   OperatorMeta,
   RunConfig,
   RunControlAction,
@@ -33,6 +34,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listOperators: () => request<OperatorMeta[]>("/api/operators"),
+
+  /**
+   * Genes a problem needs for these params, or null when any length works.
+   *
+   * The client cannot derive this: JSON Schema can describe a `target` string
+   * but not "one gene per character of it".
+   */
+  genomeLength: (problemId: string, params: Record<string, unknown>) =>
+    request<GenomeLengthResponse>(
+      `/api/problems/${encodeURIComponent(problemId)}/genome-length`,
+      { method: "POST", body: JSON.stringify({ params }) },
+    ),
   listProblems: () => request<OperatorMeta[]>("/api/problems"),
   createRun: (config: RunConfig) =>
     request<CreateRunResponse>("/api/runs", {

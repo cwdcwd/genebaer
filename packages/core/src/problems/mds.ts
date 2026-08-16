@@ -48,12 +48,28 @@ export class MinimumDominatingSet extends FitnessProblem<number[]> {
 
   constructor(params: Record<string, unknown> = {}) {
     super(params);
+    // An absent param takes the default; a PRESENT but unrecognised one is a
+    // typo, and silently substituting Petersen would run a different problem
+    // than the one asked for while looking entirely healthy. Found by the
+    // genome-length endpoint's error path (genebaer-7tu).
     const name = params["graph"];
-    this.graph = name === "cycle7" ? cycleGraph(7) : petersenGraph();
+    if (name === undefined || name === "petersen") this.graph = petersenGraph();
+    else if (name === "cycle7") this.graph = cycleGraph(7);
+    else {
+      throw new RangeError(
+        `MinimumDominatingSet: unknown graph ${JSON.stringify(name)}; ` +
+          `expected 'petersen' or 'cycle7'`,
+      );
+    }
     this.penalty = Math.max(
       1,
       numberParam(MinimumDominatingSet.paramsSchema, params, "penalty", 100),
     );
+  }
+
+  /** One gene per vertex: the genome IS the subset indicator. */
+  override get requiredGenomeLength(): number {
+    return this.graph.n;
   }
 
   override evaluate(genome: number[]): number {

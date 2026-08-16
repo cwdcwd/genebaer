@@ -50,6 +50,7 @@ export default function NewExperimentPage() {
   const [encoding, setEncoding] = useState<OperatorState | null>(null);
   const [ops, setOps] = useState<OpSelectionState | null>(null);
   const [terminations, setTerminations] = useState<OperatorState[]>([]);
+  const [requiredLength, setRequiredLength] = useState<number | null>(null);
 
   const [populationSize, setPopulationSize] = useState(100);
   const [mutationRate, setMutationRate] = useState(0.01);
@@ -128,6 +129,42 @@ export default function NewExperimentPage() {
     () => terminationOps.filter((t) => compatible(t, encId)),
     [terminationOps, encId],
   );
+
+  /**
+   * Ask the server how many genes the chosen problem needs.
+   *
+   * genebaer-7tu: the form filtered encodings by compatibility but never sized
+   * them, so picking image-prompt gave numeric's default 10 dimensions against
+   * the 240 it needs, and the run failed at render time. The client cannot
+   * compute this itself — it only ever sees JSON Schema.
+   */
+  useEffect(() => {
+    if (!problem) return;
+    let cancelled = false;
+    api
+      .genomeLength(problem.id, problem.params)
+      .then((res) => {
+        if (!cancelled) setRequiredLength(res.genomeLength);
+      })
+      .catch(() => {
+        // Mid-edit params the problem rejects. Leaving the last known value
+        // would size the encoding from a stale requirement, which is worse
+        // than leaving it alone.
+        if (!cancelled) setRequiredLength(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [problem]);
+
+  // Write the requirement into whichever param the encoding says sets its size.
+  useEffect(() => {
+    if (requiredLength === null || !encoding) return;
+    const key = encodingMeta?.sizeParam;
+    if (!key) return;
+    if (encoding.params[key] === requiredLength) return;
+    setEncoding({ ...encoding, params: { ...encoding.params, [key]: requiredLength } });
+  }, [requiredLength, encoding, encodingMeta]);
 
   const pickOp = useCallback(
     (kind: "selection" | "crossover" | "mutation", candidates: OperatorMeta[], keep?: OperatorState | null): OperatorState | null => {
@@ -353,6 +390,15 @@ export default function NewExperimentPage() {
           </Select>
           {encodingMeta && (
             <p className="mt-2 text-xs text-muted">{encodingMeta.description}</p>
+          )}
+          {requiredLength !== null && encodingMeta?.sizeParam && (
+            /* Say so rather than silently overwriting what the user typed. */
+            <p className="mt-2 text-xs text-accent">
+              {problemMeta?.displayName ?? "This problem"} fixes{" "}
+              <span className="mono">{encodingMeta.sizeParam}</span> at{" "}
+              <span className="mono">{requiredLength}</span>; it is kept in step
+              with the problem&apos;s params.
+            </p>
           )}
           {encoding && Object.keys(encodingMeta?.paramsSchema ?? {}).length > 0 && (
             <div className="mt-3">

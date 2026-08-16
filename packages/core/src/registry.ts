@@ -61,6 +61,12 @@ export class OperatorRegistry {
           compatibleEncodings?: readonly string[];
         }).compatibleEncodings;
         if (compat && compat.length > 0) meta.compatibleEncodings = [...compat];
+        // Encodings name the param that sets genome size, so a client can size
+        // one to a problem without hardcoding which key that is per encoding.
+        const sizeParam = (ctor as OperatorConstructor & { sizeParam?: unknown }).sizeParam;
+        if (typeof sizeParam === "string" && sizeParam.length > 0) {
+          meta.sizeParam = sizeParam;
+        }
         out.push(meta);
       }
     }

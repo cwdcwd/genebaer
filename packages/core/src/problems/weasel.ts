@@ -26,6 +26,11 @@ export class Weasel extends FitnessProblem<string> {
     this.target = stringParam(Weasel.paramsSchema, params, "target", "METHINKS IT IS LIKE A WEASEL");
   }
 
+  /** One gene per target character; a shorter genome can never match. */
+  override get requiredGenomeLength(): number {
+    return this.target.length;
+  }
+
   override evaluate(genome: string): number {
     const n = Math.min(genome.length, this.target.length);
     let score = 0;

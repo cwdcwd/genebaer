@@ -195,3 +195,31 @@ describe("ImagePrompt operator", () => {
     expect(problem.visualize([1, 0, 1])).toBeNull();
   });
 });
+
+describe("declaring its genome length to the UI", () => {
+  it("reports the required length under both representations", () => {
+    // genebaer-7tu: the new-run form sizes the encoding from this. It must be
+    // right for polygons (set by polygon count) and for bits (set by canvas),
+    // because those are set by completely different params.
+    const polygons = new ImagePrompt({ width: 64, height: 64, polygons: 24 });
+    expect(polygons.requiredGenomeLength).toBe(240);
+    expect(polygons.requiredGenomeLength).toBe(polygons.genomeLength);
+
+    const bits = new ImagePrompt({ representation: "bits", width: 16, height: 8 });
+    expect(bits.requiredGenomeLength).toBe(16 * 8 * 24);
+    expect(bits.requiredGenomeLength).toBe(bits.genomeLength);
+  });
+
+  it("tracks the param that actually drives each representation", () => {
+    // Under polygons, canvas size must NOT change the genome length; under
+    // bits it must. Getting these the wrong way round would size every image
+    // run incorrectly while still looking plausible.
+    const a = new ImagePrompt({ width: 32, height: 32, polygons: 10 });
+    const b = new ImagePrompt({ width: 128, height: 128, polygons: 10 });
+    expect(a.requiredGenomeLength).toBe(b.requiredGenomeLength);
+
+    const small = new ImagePrompt({ representation: "bits", width: 8, height: 8 });
+    const large = new ImagePrompt({ representation: "bits", width: 16, height: 16 });
+    expect(large.requiredGenomeLength).toBeGreaterThan(small.requiredGenomeLength);
+  });
+});
