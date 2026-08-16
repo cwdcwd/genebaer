@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { EvalJobPayload } from "@genebaer/shared-types";
+import type { EvalJobPayload, WorkerCapability } from "@genebaer/shared-types";
+import { api } from "@/lib/api";
 import { WS_URL } from "@/lib/config";
 import {
   WorkerClient,
@@ -9,6 +10,10 @@ import {
   type WorkerClientView,
 } from "@/lib/worker-client";
 import { createClipScorer } from "@/lib/clip-browser";
+import {
+  capabilityFromOperators,
+  unsupportedMessage,
+} from "@/lib/worker-capability";
 
 /** Worker socket lives beside the run socket: /ws -> /ws/worker. */
 const WORKER_WS_URL = WS_URL + "/worker";
@@ -35,8 +40,39 @@ export function WorkerPanel() {
     error: null,
   });
   const [enabled, setEnabled] = useState(false);
+  const [capability, setCapability] = useState<WorkerCapability | null>(null);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const clientRef = useRef<WorkerClient | null>(null);
+
+  /**
+   * Learn the evaluator version from the server rather than hardcoding it.
+   *
+   * A literal here was genebaer-vnb: the registry matches workers on
+   * id@version, so a stale string meant this tab registered fine and was never
+   * offered a job — which reads as "no work available", not as an error.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listOperators()
+      .then((operators) => {
+        if (cancelled) return;
+        const cap = capabilityFromOperators(operators);
+        if (cap) setCapability(cap);
+        else setCapabilityError(unsupportedMessage(operators));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setCapabilityError(
+            `Could not read the server's evaluators: ${(err as Error).message}`,
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * Score one job with real in-browser CLIP.
@@ -53,16 +89,14 @@ export function WorkerPanel() {
   );
 
   useEffect(() => {
-    if (!enabled) return;
+    // No capability, no registration. Guessing a version would recreate the
+    // silent never-offered-work failure this replaces.
+    if (!enabled || !capability) return;
 
     const socket = new WebSocket(WORKER_WS_URL);
     socketRef.current = socket;
     const client = new WorkerClient({
-      // MUST track ClipSimilarityEvaluator.version in packages/server. The
-      // registry matches workers on evaluatorId@version, so a stale string here
-      // means this tab is simply never offered jobs — and that looks exactly
-      // like "no work available", not like an error. Tracked as genebaer-vnb.
-      capabilities: [{ evaluatorId: "clip-similarity", version: "clip-vit-base-patch32.2" }],
+      capabilities: [capability],
       batchSize: 4,
       score,
       send: (msg) => {
@@ -95,7 +129,7 @@ export function WorkerPanel() {
       socketRef.current = null;
       clientRef.current = null;
     };
-  }, [enabled, score]);
+  }, [enabled, score, capability]);
 
   return (
     <div className="space-y-2">
@@ -103,11 +137,14 @@ export function WorkerPanel() {
         <div>
           <div className="text-sm text-foreground">Use this tab as a worker</div>
           <div className="text-[11px] text-muted">
-            Contributes this browser to any run needing CLIP scoring.
+            {capability
+              ? `Contributes this browser to any run needing ${capability.evaluatorId}@${capability.version}.`
+              : "Contributes this browser to any run needing CLIP scoring."}
           </div>
         </div>
         <button
           type="button"
+          disabled={!capability && !enabled}
           onClick={() => setEnabled((v) => !v)}
           className={
             enabled
@@ -139,6 +176,12 @@ export function WorkerPanel() {
             <dd className="mono text-foreground">{view.abandoned}</dd>
           </div>
         </dl>
+      )}
+
+      {capabilityError && (
+        <p className="mono rounded border border-danger/40 bg-danger/10 p-2 text-[11px] text-danger">
+          {capabilityError}
+        </p>
       )}
 
       {view.error && (

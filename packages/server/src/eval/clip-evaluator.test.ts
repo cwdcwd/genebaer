@@ -294,3 +294,33 @@ describe("augmented scoring", () => {
     );
   });
 });
+
+describe("advertising the contract to remote workers", () => {
+  it("publishes the evaluator's version in registry metadata", async () => {
+    // genebaer-vnb: the browser worker used to hardcode this string, so a bump
+    // here left it registering with a version the registry would never match —
+    // accepted, then never offered a job, with no error anywhere. Publishing
+    // the version is what lets a remote worker follow the server instead.
+    const { createDefaultRegistry } = await import("@genebaer/core");
+    const registry = createDefaultRegistry().register(
+      "evaluator",
+      ClipSimilarityEvaluator,
+    );
+    const meta = registry
+      .listMetadata("evaluator")
+      .find((m) => m.id === "clip-similarity");
+
+    expect(meta?.version).toBe(new ClipSimilarityEvaluator().version);
+    expect(meta?.version).toBeTruthy();
+  });
+
+  it("leaves version off operators that have no contract version", async () => {
+    // Only evaluators carry one; putting a stray version on a mutation operator
+    // would imply a compatibility rule that does not exist.
+    const { createDefaultRegistry } = await import("@genebaer/core");
+    const registry = createDefaultRegistry();
+    for (const meta of registry.listMetadata("mutation")) {
+      expect(meta.version).toBeUndefined();
+    }
+  });
+});

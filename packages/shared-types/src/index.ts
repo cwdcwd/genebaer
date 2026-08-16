@@ -59,6 +59,16 @@ export interface OperatorMeta {
   paramsSchema: Record<string, JSONSchema>;
   /** Encoding ids this operator works with; absent/empty = encoding-agnostic. */
   compatibleEncodings?: string[];
+  /**
+   * Contract version, for operators that have one (evaluators).
+   *
+   * Workers advertise capability as `id@version`, and the registry will not
+   * offer a job to a worker whose version does not match. Exposing it here is
+   * what lets a remote worker register with the version the server actually
+   * wants instead of a literal it was compiled with — a stale literal produces
+   * a worker that registers fine and is simply never given work.
+   */
+  version?: string;
 }
 
 // ---------- Run configuration ----------
