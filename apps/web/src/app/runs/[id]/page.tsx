@@ -235,21 +235,9 @@ export default function RunDetailPage({
 
           <Card>
             <CardHeader>
-<<<<<<< HEAD
               <CardTitle>This browser</CardTitle>
             </CardHeader>
             <WorkerPanel />
-=======
-              <CardTitle>What the model sees</CardTitle>
-              {stream.annotations.length > 0 && (
-                <span className="mono text-[10px] text-muted">
-                  {stream.annotations.length} caption
-                  {stream.annotations.length === 1 ? "" : "s"}
-                </span>
-              )}
-            </CardHeader>
-            <Annotations annotations={stream.annotations} />
->>>>>>> master
           </Card>
 
           <Card>
