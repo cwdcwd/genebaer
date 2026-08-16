@@ -23,6 +23,14 @@ interface OperatorState {
   params: Record<string, unknown>;
 }
 
+/**
+ * What the engine falls back to when a config omits `evaluator` entirely.
+ *
+ * Kept in step with GeneticAlgorithmEngine's own default so that surfacing the
+ * choice in this form does not change what an otherwise-identical run does.
+ */
+const DEFAULT_EVALUATOR_ID = "local";
+
 type OpSelectionState = Record<"selection" | "crossover" | "mutation", OperatorState>;
 
 function refToState(ref: OperatorRef, schema: Record<string, JSONSchema>): OperatorState {
@@ -50,6 +58,7 @@ export default function NewExperimentPage() {
   const [encoding, setEncoding] = useState<OperatorState | null>(null);
   const [ops, setOps] = useState<OpSelectionState | null>(null);
   const [terminations, setTerminations] = useState<OperatorState[]>([]);
+  const [evaluator, setEvaluator] = useState<OperatorState | null>(null);
 
   const [populationSize, setPopulationSize] = useState(100);
   const [mutationRate, setMutationRate] = useState(0.01);
@@ -88,7 +97,15 @@ export default function NewExperimentPage() {
   // Grouped into one memo: a bare `?? []` in the component body allocates a
   // fresh array every render, which churns every useMemo/useEffect below that
   // depends on these lists.
-  const { problems, encodings, selections, crossovers, mutations, terminationOps } = useMemo(
+  const {
+    problems,
+    encodings,
+    selections,
+    crossovers,
+    mutations,
+    terminationOps,
+    evaluators,
+  } = useMemo(
     () => ({
       problems: byKind.get("problem") ?? [],
       encodings: byKind.get("encoding") ?? [],
@@ -96,12 +113,14 @@ export default function NewExperimentPage() {
       crossovers: byKind.get("crossover") ?? [],
       mutations: byKind.get("mutation") ?? [],
       terminationOps: byKind.get("termination") ?? [],
+      evaluators: byKind.get("evaluator") ?? [],
     }),
     [byKind],
   );
 
   const problemMeta = problem ? metaById.get(`problem:${problem.id}`) : undefined;
   const encodingMeta = encoding ? metaById.get(`encoding:${encoding.id}`) : undefined;
+  const evaluatorMeta = evaluator ? metaById.get(`evaluator:${evaluator.id}`) : undefined;
 
   const problemEncodings = useMemo(() => {
     if (problemMeta?.compatibleEncodings?.length) {
@@ -151,6 +170,14 @@ export default function NewExperimentPage() {
       setProblem({ id: first.id, params: defaultsFromSchema(first.paramsSchema) });
     }
   }, [operators, problem, problems]);
+
+  // Default to 'local', which is exactly what the engine picks for a config
+  // that omits the field — so adding this section changes no existing run.
+  useEffect(() => {
+    if (evaluator || evaluators.length === 0) return;
+    const chosen = evaluators.find((e) => e.id === DEFAULT_EVALUATOR_ID) ?? evaluators[0]!;
+    setEvaluator({ id: chosen.id, params: defaultsFromSchema(chosen.paramsSchema) });
+  }, [evaluator, evaluators]);
 
   useEffect(() => {
     if (!problem) return;
@@ -218,8 +245,19 @@ export default function NewExperimentPage() {
       elitism,
       termination: terminations.map((t) => ({ id: t.id, params: t.params })),
       seed,
+      ...(evaluator ? { evaluator: { id: evaluator.id, params: evaluator.params } } : {}),
     };
-  }, [problem, encoding, ops, terminations, mutationRate, populationSize, elitism, seed]);
+  }, [
+    problem,
+    encoding,
+    ops,
+    terminations,
+    mutationRate,
+    populationSize,
+    elitism,
+    seed,
+    evaluator,
+  ]);
 
   const startRun = async () => {
     const config = buildConfig();
@@ -264,6 +302,12 @@ export default function NewExperimentPage() {
       config.termination.map((t) =>
         refToState(t, metaById.get(`termination:${t.id}`)?.paramsSchema ?? {}),
       ),
+    );
+    // A preset saved before this section existed has no evaluator; fall back to
+    // the engine's own default rather than leaving the form half-populated.
+    const evalRef = config.evaluator ?? { id: DEFAULT_EVALUATOR_ID };
+    setEvaluator(
+      refToState(evalRef, metaById.get(`evaluator:${evalRef.id}`)?.paramsSchema ?? {}),
     );
     setPopulationSize(config.populationSize);
     setMutationRate(config.mutationRate);
@@ -455,6 +499,46 @@ export default function NewExperimentPage() {
               <p className="text-xs text-muted">No termination conditions available.</p>
             )}
           </div>
+        </Card>
+
+        {/* Evaluator */}
+        <Card>
+          <CardHeader>
+            <CardTitle>7 · Evaluator (where fitness is computed)</CardTitle>
+          </CardHeader>
+          <Select
+            value={evaluator?.id ?? ""}
+            onChange={(e) => {
+              const meta = evaluators.find((ev) => ev.id === e.target.value);
+              if (meta) {
+                setEvaluator({ id: meta.id, params: defaultsFromSchema(meta.paramsSchema) });
+              }
+            }}
+          >
+            {evaluators.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {/* The version is part of what a score MEANS: two versions are
+                    not comparable, so it belongs next to the name. */}
+                {ev.displayName}
+                {ev.version ? ` (${ev.version})` : ""}
+              </option>
+            ))}
+          </Select>
+          {evaluatorMeta && (
+            <p className="mt-2 text-xs text-muted">{evaluatorMeta.description}</p>
+          )}
+          {evaluators.length === 0 && (
+            <p className="text-xs text-muted">No evaluators registered.</p>
+          )}
+          {evaluator && evaluatorMeta && Object.keys(evaluatorMeta.paramsSchema).length > 0 && (
+            <div className="mt-3">
+              <ParamsForm
+                paramsSchema={evaluatorMeta.paramsSchema}
+                values={evaluator.params}
+                onChange={(params) => setEvaluator({ ...evaluator, params })}
+              />
+            </div>
+          )}
         </Card>
       </div>
 
