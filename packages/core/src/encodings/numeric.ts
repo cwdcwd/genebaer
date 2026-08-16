@@ -5,6 +5,7 @@ import { numberParam } from "../random.js";
 /** Genome: number[] of reals, each bounded to [min, max]. */
 export class NumericVectorEncoding extends Encoding<number[]> {
   static override readonly operatorId = "numeric";
+  static override readonly sizeParam = "dimensions";
   static override readonly displayName = "Numeric vector";
   static override readonly description =
     "Real-valued vector genome, components bounded to [min, max].";

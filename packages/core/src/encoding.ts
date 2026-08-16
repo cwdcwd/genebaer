@@ -9,6 +9,15 @@ import type { RandomSource } from "./random.js";
  * G is the genome type parameter (e.g. number[], string).
  */
 export abstract class Encoding<G> extends BaseOperator {
+  /**
+   * Which of this encoding's params sets the genome size.
+   *
+   * Named rather than assumed: it is "length" for binary and string but
+   * "dimensions" for numeric, and a hardcoded map in the UI would be exactly
+   * the kind of duplicated knowledge that goes stale silently.
+   */
+  static readonly sizeParam: string | null = null;
+
   /** Registry id, e.g. "binary". Also used as `compatibleEncodings` value. */
   declare static readonly operatorId: string;
 

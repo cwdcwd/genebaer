@@ -5,6 +5,7 @@ import { numberParam, stringParam } from "../random.js";
 /** Genome: JavaScript string over a fixed alphabet, fixed length. */
 export class StringEncoding extends Encoding<string> {
   static override readonly operatorId = "string";
+  static override readonly sizeParam = "length";
   static override readonly displayName = "String";
   static override readonly description = "Fixed-length string over a given alphabet.";
   static override readonly paramsSchema = {

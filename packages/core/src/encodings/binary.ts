@@ -5,6 +5,7 @@ import { numberParam } from "../random.js";
 /** Genome: number[] of 0/1. */
 export class BinaryEncoding extends Encoding<number[]> {
   static override readonly operatorId = "binary";
+  static override readonly sizeParam = "length";
   static override readonly displayName = "Binary";
   static override readonly description = "Bit-string genome of fixed length.";
   static override readonly paramsSchema = {

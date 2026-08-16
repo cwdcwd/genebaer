@@ -160,6 +160,14 @@ export class ImagePrompt extends FitnessProblem<number[]> {
     );
   }
 
+  /**
+   * The general contract the UI reads, satisfied by this problem's own
+   * representation-dependent length.
+   */
+  override get requiredGenomeLength(): number {
+    return this.genomeLength;
+  }
+
   /** Genes a genome must have for this problem's configuration. */
   get genomeLength(): number {
     return this.representation === "bits"

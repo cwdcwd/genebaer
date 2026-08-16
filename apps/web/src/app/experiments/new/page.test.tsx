@@ -10,10 +10,14 @@ vi.mock("next/navigation", () => ({
 
 const listOperators = vi.fn<() => Promise<OperatorMeta[]>>();
 const createRun = vi.fn<(c: RunConfig) => Promise<{ runId: string }>>();
+// The form asks the server how many genes the problem needs (genebaer-7tu).
+// These tests are about the evaluator section, so it answers "any length".
+const genomeLength = vi.fn(() => Promise.resolve({ genomeLength: null }));
 vi.mock("@/lib/api", () => ({
   api: {
     listOperators: () => listOperators(),
     createRun: (c: RunConfig) => createRun(c),
+    genomeLength: () => genomeLength(),
   },
 }));
 
