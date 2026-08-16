@@ -19,7 +19,7 @@ A pnpm workspace driven by turbo. Node >= 20, pnpm 11.9.0.
 | `packages/shared-types` | The type contract. Pure declarations, zero runtime code. | Types only |
 | `packages/core` | The GA engine and every operator. | **No** |
 | `packages/server` | Fastify HTTP + WebSocket host, SQLite persistence, job queue and worker registry. | No |
-| `packages/vision` | Image genome, the image problem, and PNG encoding. | No |
+| `packages/vision` | Image genomes (polygon and bit-string representations), the image problem, and PNG encoding. | No |
 | `apps/web` | Next.js visualizer. | Yes |
 
 ### Dependency direction

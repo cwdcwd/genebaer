@@ -106,7 +106,10 @@ to express with 50 translucent polygons; the encoding itself excludes most of
 the off-manifold space. This is why the classic "evolving Mona Lisa" approach
 uses primitives, and it is the alternative encoding
 [the previous spike](./raw-bitstring-convergence.md) named but did not need to
-evaluate. It is now needed. Tracked as **genebaer-6hf**.
+evaluate. It is now needed. Tracked as **genebaer-6hf**, and now built —
+see [Constraining the search space with polygons](./polygon-constraint.md).
+The representation is in place and its constraining mechanism is measured; its
+effect on the adversarial score is not yet, and that doc says so plainly.
 
 **2. Score under augmentation.** Adversarial patterns are brittle: they stop
 working under random crops, flips, and resizes. Scoring the mean CLIP similarity

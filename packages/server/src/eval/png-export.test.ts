@@ -1,6 +1,6 @@
 import type { RunConfig } from "@genebaer/shared-types";
 import { createDefaultRegistry } from "@genebaer/core";
-import { ImagePrompt, encodingParamsFor, isPng } from "@genebaer/vision";
+import { ImagePrompt, isPng, polygonEncodingParams } from "@genebaer/vision";
 import { afterEach, describe, expect, it } from "vitest";
 import { JobQueue } from "./job-queue.js";
 import { QueuedEvaluator, setActiveQueue } from "./queued-evaluator.js";
@@ -28,15 +28,21 @@ afterEach(async () => {
   setActiveQueue(null);
 });
 
-const SHAPE = { width: 4, height: 4 };
+const SHAPE = { width: 8, height: 8 };
+const POLYGONS = 3;
 
 function imageConfig(): RunConfig {
   return {
-    problem: { id: "image-prompt", params: { ...SHAPE, prompt: "a red circle" } },
-    encoding: { id: "binary", params: encodingParamsFor(SHAPE) },
+    // The default polygon representation, so export is exercised on the path
+    // production actually takes.
+    problem: {
+      id: "image-prompt",
+      params: { ...SHAPE, polygons: POLYGONS, prompt: "a red circle" },
+    },
+    encoding: { id: "numeric", params: polygonEncodingParams(POLYGONS) },
     selection: { id: "tournament" },
     crossover: { id: "one-point" },
-    mutation: { id: "bit-flip" },
+    mutation: { id: "gaussian" },
     mutationRate: 0.01,
     populationSize: 4,
     elitism: 1,
