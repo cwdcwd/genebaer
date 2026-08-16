@@ -66,7 +66,13 @@ scorers.set("clip-similarity", async (payload, params) => {
         "meaningless number that still looks like fitness.",
     );
   }
-  return scoreImageAgainstPrompt(payload, prompt);
+  const augmentations = Number(params?.augmentations ?? 1);
+  if (!Number.isInteger(augmentations) || augmentations < 1) {
+    throw new RangeError(
+      `clip-similarity: augmentations must be a positive integer, got ${augmentations}`,
+    );
+  }
+  return scoreImageAgainstPrompt(payload, prompt, augmentations);
 });
 
 export function getScorer(evaluatorId) {

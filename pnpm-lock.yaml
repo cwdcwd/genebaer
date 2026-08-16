@@ -38,6 +38,9 @@ importers:
       '@genebaer/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@genebaer/vision':
+        specifier: workspace:*
+        version: link:../../packages/vision
       '@hookform/resolvers':
         specifier: ^3.9.1
         version: 3.10.0(react-hook-form@7.85.0(react@19.2.8))

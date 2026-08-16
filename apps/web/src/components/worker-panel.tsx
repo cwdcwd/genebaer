@@ -58,7 +58,11 @@ export function WorkerPanel() {
     const socket = new WebSocket(WORKER_WS_URL);
     socketRef.current = socket;
     const client = new WorkerClient({
-      capabilities: [{ evaluatorId: "clip-similarity", version: "clip-vit-base-patch32.1" }],
+      // MUST track ClipSimilarityEvaluator.version in packages/server. The
+      // registry matches workers on evaluatorId@version, so a stale string here
+      // means this tab is simply never offered jobs — and that looks exactly
+      // like "no work available", not like an error. Tracked as genebaer-vnb.
+      capabilities: [{ evaluatorId: "clip-similarity", version: "clip-vit-base-patch32.2" }],
       batchSize: 4,
       score,
       send: (msg) => {

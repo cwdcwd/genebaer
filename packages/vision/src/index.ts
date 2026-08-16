@@ -1,4 +1,10 @@
 export {
+  augmentedViews,
+  imageSeed,
+  type RgbBytes,
+  type RgbImage,
+} from "./augment.js";
+export {
   BITS_PER_PIXEL,
   CHANNELS,
   bitsToRgb,

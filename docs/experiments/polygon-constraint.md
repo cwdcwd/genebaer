@@ -76,7 +76,16 @@ this.
 detailed image and accept the exposure; claiming the constraint holds when it
 does not is the failure mode worth preventing.
 
-## What is NOT yet established
+## What was NOT established here — and has since been measured
+
+> **Update (genebaer-6kh).** The run this section asks for now exists:
+> [augmented-clip-scoring.md](./augmented-clip-scoring.md). The short version is
+> that failure mode 1 below is real. Polygons alone, scored without
+> augmentation, still reach **0.2488** against a real photograph's **0.2122** —
+> a 17% adversarial margin, roughly half the bit string's 38%. The constraint
+> halves the exploit; it does not remove it. Combined with augmented scoring the
+> margin falls to 7%, the closest to photograph parity of any configuration
+> tested. The section below is left as written, because it named the right risk.
 
 **This has not been run against CLIP.** Everything above measures what the
 representation can express, which is the mechanism the defence rests on. It does

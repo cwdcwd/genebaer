@@ -103,16 +103,30 @@ export function cosineSimilarity(a, b) {
  * The text embedding is cached: it is identical for every individual of every
  * generation of a run, so embedding it per image would multiply the text-side
  * cost by the population size for nothing.
+ *
+ * With `augmentations > 1` the score is the MEAN similarity over that many
+ * random crops/flips of the image. Adversarial patterns depend on exact pixel
+ * alignment and collapse under a change of viewpoint, while a genuinely
+ * recognisable image survives one - so the mean prices in robustness. The views
+ * are seeded from the pixels, keeping the score an exact function of the image.
+ * Costs N times the image-side inference; the text side is unaffected.
  */
-export async function scoreImageAgainstPrompt(payload, prompt) {
+export async function scoreImageAgainstPrompt(payload, prompt, augmentations = 1) {
   const impl = await ensureBackend();
   let textEmbedding = textCache.get(prompt);
   if (!textEmbedding) {
     textEmbedding = await impl.embedText(prompt);
     textCache.set(prompt, textEmbedding);
   }
-  const imageEmbedding = await impl.embedImage(payload);
-  return cosineSimilarity(imageEmbedding, textEmbedding);
+
+  const { augmentedViews } = await import("@genebaer/vision");
+  const views = augmentedViews(payload, augmentations);
+  let total = 0;
+  for (const view of views) {
+    const imageEmbedding = await impl.embedImage(view);
+    total += cosineSimilarity(imageEmbedding, textEmbedding);
+  }
+  return total / views.length;
 }
 
 /** How many prompts are currently embedded. Exposed for tests. */

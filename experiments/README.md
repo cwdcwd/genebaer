@@ -27,7 +27,16 @@ BUDGET=4000 PROMPT="a photograph of a cat" node experiments/clip-gradient.mjs
 
 # Is the evolved image on-manifold, or adversarial?
 node experiments/clip-drawn-target-control.mjs
+
+# Does scoring under random augmentation blunt the exploit? (genebaer-6kh)
+# Run from packages/server so node resolves the optional dependency.
+cd packages/server
+BUDGET=4000 N_AUG=8 IMAGE=/path/to/cats.jpg \
+  node ../../experiments/clip-augmented-robustness.mjs
 ```
+
+`clip-augmented-robustness.mjs` is the expensive one: the N=8 arms cost eight
+image embeddings per candidate, so budget for ~20 minutes at BUDGET=4000.
 
 The first run downloads weights and takes ~11s longer.
 
@@ -43,5 +52,11 @@ an actually-drawn red circle scored **0.2621**.
 `clip-natural-baseline.mjs` — the same conclusion against a real photograph,
 which is the fairer ceiling. GA-evolved noise **0.3189** vs a genuine cat photo
 **0.2370**, and **0.2122** for that photo resized to the GA resolution.
+
+`clip-augmented-robustness.mjs` — averaging over 8 random crops/flips strips the
+attack of most of its score (**−21%**) while a real photograph loses **1.6%**.
+It is not a cure: optimising the augmented objective directly still beats the
+photograph by 13%, and only augmentation *plus* the polygon representation
+brings that to 7%.
 
 Full write-up: [`../docs/experiments/clip-gradient.md`](../docs/experiments/clip-gradient.md).

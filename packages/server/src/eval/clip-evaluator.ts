@@ -29,8 +29,20 @@ export interface ClipJobPayload {
  */
 export class ClipSimilarityEvaluator extends QueuedEvaluator {
   static override readonly operatorId = "clip-similarity";
-  /** Bump on ANY change to the model or preprocessing. */
-  static override readonly version = "clip-vit-base-patch32.1";
+  /**
+   * Bump on ANY change to the model or preprocessing.
+   *
+   * `.2` added augmentation. Note WHY that needs a version bump: the score
+   * cache keys on params, so N=1 and N=8 scores could never collide there. The
+   * hazard is the worker registry. A worker running `.1` code does not know the
+   * `augmentations` param exists, would ignore it, and would return a single
+   * aligned score for a run that believes it is scoring a mean over eight
+   * views. Version is how capability, not just model identity, is matched.
+   */
+  static override readonly version = "clip-vit-base-patch32.2";
+  // NOTE: apps/web/src/components/worker-panel.tsx hardcodes this string as its
+  // declared capability. Changing it here without changing it there leaves
+  // browser workers silently unmatched. Tracked as genebaer-vnb.
   static override readonly displayName = "CLIP similarity";
   static override readonly description =
     "Scores an image against the problem's prompt using CLIP image/text cosine similarity.";
@@ -41,6 +53,15 @@ export class ClipSimilarityEvaluator extends QueuedEvaluator {
       title: "Prompt override",
       description:
         "Leave empty to use the problem's prompt. Set only to score against different text than the problem defines.",
+    },
+    augmentations: {
+      type: "integer",
+      minimum: 1,
+      maximum: 32,
+      default: 1,
+      title: "Augmented views",
+      description:
+        "Score the mean CLIP similarity over N random crops/flips instead of one aligned view. Adversarial patterns depend on exact pixel alignment and do not survive this; a recognisable image does. Costs N times the inference. 1 means no augmentation.",
     },
   } as const;
 
@@ -88,7 +109,27 @@ export class ClipSimilarityEvaluator extends QueuedEvaluator {
     return problem instanceof ImagePrompt ? problem.prompt : "";
   }
 
+  /**
+   * How many augmented views a worker should average over.
+   *
+   * Validated here rather than worker-side so a bad config fails when the run
+   * is configured, not once per genome deep inside a worker thread.
+   */
+  get augmentations(): number {
+    const raw = this.params["augmentations"];
+    if (raw === undefined) return 1;
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) {
+      throw new RangeError(
+        `'${ClipSimilarityEvaluator.operatorId}': augmentations must be a positive ` +
+          `integer, got ${JSON.stringify(raw)}`,
+      );
+    }
+    return raw;
+  }
+
   protected override paramsForJob(context: EvaluationContext<unknown>): Record<string, unknown> {
-    return { prompt: this.promptFor(context) };
+    // Part of the job params, so it is part of the score cache key: a run at
+    // N=8 must never be served a number measured at N=1.
+    return { prompt: this.promptFor(context), augmentations: this.augmentations };
   }
 }
