@@ -6,10 +6,10 @@ import type {
   WsServerMessage,
 } from "@genebaer/shared-types";
 import {
-  createDefaultRegistry,
   GeneticAlgorithmEngine,
   type OperatorRegistry,
 } from "@genebaer/core";
+import { createServerRegistry } from "./registry.js";
 import type { RunStore } from "./db/run-store.js";
 import { QueuedEvaluator } from "./eval/queued-evaluator.js";
 import type { WorkerRegistry } from "./eval/worker-registry.js";
@@ -46,7 +46,7 @@ export class RunManager {
 
   constructor(store: RunStore, registry?: OperatorRegistry) {
     this.store = store;
-    this.registry = registry ?? createDefaultRegistry();
+    this.registry = registry ?? createServerRegistry();
 
     // Engines exist only in memory, so on a fresh process nothing can still be
     // running. Any row left non-terminal belongs to a process that died; close

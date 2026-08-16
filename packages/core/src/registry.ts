@@ -61,6 +61,11 @@ export class OperatorRegistry {
           compatibleEncodings?: readonly string[];
         }).compatibleEncodings;
         if (compat && compat.length > 0) meta.compatibleEncodings = [...compat];
+        // Evaluators carry a contract version; nothing else does. Surfacing it
+        // here is what allows a remote worker to register with the version the
+        // server wants rather than one hardcoded at build time.
+        const version = (ctor as OperatorConstructor & { version?: unknown }).version;
+        if (typeof version === "string" && version.length > 0) meta.version = version;
         // Encodings name the param that sets genome size, so a client can size
         // one to a problem without hardcoding which key that is per encoding.
         const sizeParam = (ctor as OperatorConstructor & { sizeParam?: unknown }).sizeParam;
