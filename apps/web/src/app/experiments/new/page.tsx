@@ -517,7 +517,10 @@ export default function NewExperimentPage() {
           >
             {evaluators.map((ev) => (
               <option key={ev.id} value={ev.id}>
+                {/* The version is part of what a score MEANS: two versions are
+                    not comparable, so it belongs next to the name. */}
                 {ev.displayName}
+                {ev.version ? ` (${ev.version})` : ""}
               </option>
             ))}
           </Select>
