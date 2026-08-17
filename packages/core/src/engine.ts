@@ -29,6 +29,43 @@ export const DIVERSITY_MIN_SAMPLE = 5;
  * then clamps. Exported as a pure function so the policy can be asserted
  * directly rather than inferred from a wall-clock measurement.
  */
+/**
+ * Reject a run whose encoding produces genomes the problem cannot use.
+ *
+ * Some problems need an exact genome length: Weasel one gene per target
+ * character, MDS one per vertex, ImagePrompt a number set by its
+ * representation. Pairing one with a differently-sized encoding used to be
+ * accepted, and the damage was quiet rather than loud — Weasel scored against
+ * `min(genome.length, target.length)`, so the surplus genes were simply
+ * ignored and the run optimised something subtly different from what was
+ * asked for, while looking perfectly healthy the whole way.
+ *
+ * Checked at construction, before a single generation runs, because the whole
+ * point is that this failure is otherwise invisible. Encodings whose genome
+ * size genuinely varies report null and are skipped — this rejects a known
+ * contradiction, not an unknown. See genebaer-1os.
+ */
+function assertGenomeSizeMatches<G>(
+  encoding: Encoding<G>,
+  problem: FitnessProblem<G>,
+  config: RunConfig,
+): void {
+  const required = problem.requiredGenomeLength;
+  const actual = encoding.genomeSize;
+  if (required === null || actual === null || required === actual) return;
+
+  const sizeParam = (encoding.constructor as typeof Encoding).sizeParam;
+  const fix = sizeParam
+    ? `Set the '${config.encoding.id}' encoding's ${sizeParam} to ${String(required)}`
+    : `Resize the '${config.encoding.id}' encoding to ${String(required)} genes`;
+
+  throw new RangeError(
+    `Problem '${config.problem.id}' needs a genome of exactly ${String(required)} ` +
+      `genes, but encoding '${config.encoding.id}' produces ${String(actual)}. ` +
+      `${fix}, or change the problem's params.`,
+  );
+}
+
 export function diversitySampleSize(
   populationSize: number,
   genomeLength: number,
@@ -116,6 +153,8 @@ export class GeneticAlgorithmEngine<G = unknown> {
       config.problem.id,
       config.problem.params,
     );
+    assertGenomeSizeMatches(this.encoding, this.problem, config);
+
     // Optional by design: a config written before evaluators existed, or one
     // that simply does not care, scores in-process exactly as it always did.
     this.evaluator = registry.create<FitnessEvaluator<G>>(

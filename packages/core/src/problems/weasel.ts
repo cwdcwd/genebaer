@@ -32,9 +32,21 @@ export class Weasel extends FitnessProblem<string> {
   }
 
   override evaluate(genome: string): number {
-    const n = Math.min(genome.length, this.target.length);
+    // Truncating to the shorter of the two used to hide a misconfiguration:
+    // a genome of the wrong length scored against only the overlap, so the run
+    // optimised a prefix of the target and looked healthy doing it. The engine
+    // now rejects such a pairing up front, and this is the same refusal for
+    // anyone calling the problem directly.
+    if (genome.length !== this.target.length) {
+      throw new RangeError(
+        `Weasel: genome has ${String(genome.length)} genes but the target ` +
+          `'${this.target}' needs ${String(this.target.length)}.`,
+      );
+    }
     let score = 0;
-    for (let i = 0; i < n; i++) if (genome[i] === this.target[i]) score++;
+    for (let i = 0; i < this.target.length; i++) {
+      if (genome[i] === this.target[i]) score++;
+    }
     return score;
   }
 

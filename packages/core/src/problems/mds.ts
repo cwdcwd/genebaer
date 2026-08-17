@@ -74,6 +74,15 @@ export class MinimumDominatingSet extends FitnessProblem<number[]> {
 
   override evaluate(genome: number[]): number {
     const n = this.graph.n;
+    // A short genome would read `undefined` for the missing vertices and
+    // silently treat them as "not in the set" — a smaller dominating set that
+    // does not dominate, scored as if it were valid.
+    if (genome.length !== n) {
+      throw new RangeError(
+        `MinimumDominatingSet: genome has ${String(genome.length)} genes but the ` +
+          `graph has ${String(n)} vertices.`,
+      );
+    }
     const dominated = new Array<boolean>(n).fill(false);
     let setSize = 0;
     for (let i = 0; i < n; i++) {

@@ -45,6 +45,10 @@ export class StringEncoding extends Encoding<string> {
     }
   }
 
+  override get genomeSize(): number {
+    return this.length;
+  }
+
   random(rng: RandomSource): string {
     const chars = new Array<string>(this.length);
     for (let i = 0; i < this.length; i++) chars[i] = rng.pick([...this.alphabet]);
