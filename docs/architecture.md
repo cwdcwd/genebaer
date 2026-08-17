@@ -241,19 +241,26 @@ and guessing.
 
 | Kind | Transport | Notes |
 | --- | --- | --- |
-| Worker thread | in-process | `WorkerPool`; scoring never runs on the main thread, which would starve the engine's `setImmediate` loop. **Not started by the server** — see below |
+| Worker thread | in-process | `WorkerPool`; scoring never runs on the main thread, which would starve the engine's `setImmediate` loop. **Opt-in** — see below |
 | Browser tab | `/ws/worker` | Same protocol; closing a tab returns its jobs immediately |
 | Anything else | `POST /api/workers/*` | Same protocol over HTTP |
 
-**`WorkerPool` is not wired into a running server.** It is real, tested code,
-but nothing outside the test suite constructs one, so the only worker a default
-server actually gets is a browser tab that opts in. Two things would have to
-change to make server-side scoring work: something must start a pool, and
-`@huggingface/transformers` must be installed — it is deliberately not a
-workspace dependency (~819MB with onnxruntime), so the CLIP scorer would
-otherwise fail with "requires @huggingface/transformers, which is not
-installed". Tracked as genebaer-7hs. Until then, do not tell a user to "run a
-server-side worker": there is nothing for them to run.
+**The pool is opt-in, and off by default.** Set `GENEBAER_WORKER_THREADS=4`
+(or pass `workerThreads` to `createServer`) to start in-process scoring
+threads; leave it unset and the only worker a server has is a browser tab that
+opts in. Off by default because the models are an optional dependency:
+`@huggingface/transformers` is deliberately not a workspace package (~819MB
+with onnxruntime), and starting threads that cannot load a model would replace
+a missing worker with a failing one.
+
+Its capabilities come from the registry — every registered `QueuedEvaluator`,
+by contract and version — so registering another one extends what the threads
+can claim without touching the bootstrap. `local` is excluded, since it never
+queues anything.
+
+Whether the model runtime is installed is checked **once at startup** and
+reported, rather than discovered per job: without that, a missing install reads
+as every run being broken instead of one command to run.
 
 The thread entry point and its scorers are plain `.mjs`, because a
 `worker_thread` needs a real file at runtime. `tsc` does not copy files it does

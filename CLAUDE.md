@@ -222,7 +222,7 @@ pnpm + turbo monorepo. Node >= 20, pnpm 11.9.0.
 ```bash
 pnpm install
 pnpm typecheck   # tsc --noEmit across all 5 packages — REAL GATE
-pnpm test        # vitest — REAL GATE, 468 tests
+pnpm test        # vitest — REAL GATE, 479 tests
 pnpm build       # tsc + asset copy + next build
 pnpm lint        # eslint (flat config) — REAL GATE, --max-warnings=0
 pnpm dev         # turbo run dev: server + web visualizer
@@ -234,7 +234,7 @@ pnpm setup:git   # install the beads merge driver (once per clone)
 | Gate | Real? | Coverage |
 | --- | --- | --- |
 | `typecheck` | yes | all 5 packages, including test files |
-| `test` | yes | all 5 packages — 468 tests (core 76, server 167, web 129, shared-types 36 type-level, vision 60) |
+| `test` | yes | all 5 packages — 479 tests (core 76, server 178, web 129, shared-types 36 type-level, vision 60) |
 | `lint` | yes | all 5 packages; ESLint flat config at repo root, type-aware, `--max-warnings=0` |
 | `build` | yes | all 5 packages |
 
