@@ -43,6 +43,12 @@ function operators(): OperatorMeta[] {
   return [
     meta({ id: "one-max", kind: "problem", compatibleEncodings: ["binary"] }),
     meta({
+      id: "image-prompt",
+      kind: "problem",
+      compatibleEncodings: ["binary"],
+      scorableInProcess: false,
+    }),
+    meta({
       id: "binary",
       kind: "encoding",
       paramsSchema: { length: { type: "integer", default: 32, title: "Length" } },
@@ -57,7 +63,7 @@ function operators(): OperatorMeta[] {
         maxGenerations: { type: "integer", default: 50, title: "Max generations" },
       },
     }),
-    meta({ id: "local", kind: "evaluator", displayName: "In-process" }),
+    meta({ id: "local", kind: "evaluator", displayName: "In-process", scoresInProcess: true }),
     meta({
       id: "clip-similarity",
       kind: "evaluator",
@@ -173,5 +179,60 @@ describe("what reaches the server", () => {
     const config = createRun.mock.calls[0]?.[0];
     expect(config?.evaluator?.id).toBe("local");
     expect(config?.evaluator?.params).toEqual({});
+  });
+});
+
+describe("not offering a run that cannot possibly work", () => {
+  /** The problem dropdown, found the way a person would. */
+  function problemSelect(): HTMLSelectElement {
+    const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
+    const found = selects.find((s) =>
+      [...s.options].some((o) => o.value === "image-prompt"),
+    );
+    if (!found) throw new Error("no problem select rendered");
+    return found;
+  }
+
+  it("moves off the in-process evaluator when the problem cannot use it", async () => {
+    // genebaer-gdv, as reported: picking the image problem left 'local'
+    // selected, and the run died on generation 0.
+    await renderForm();
+    const user = userEvent.setup();
+    await user.selectOptions(problemSelect(), "image-prompt");
+
+    await waitFor(() => expect(evaluatorSelect().value).not.toBe("local"));
+    expect(evaluatorSelect().value).toBe("clip-similarity");
+  });
+
+  it("sends a runnable config without the user touching the evaluator", async () => {
+    await renderForm();
+    const user = userEvent.setup();
+    await user.selectOptions(problemSelect(), "image-prompt");
+    await waitFor(() => expect(evaluatorSelect().value).toBe("clip-similarity"));
+    await user.click(screen.getByRole("button", { name: /start run/i }));
+
+    await waitFor(() => expect(createRun).toHaveBeenCalled());
+    expect(createRun.mock.calls[0]?.[0]?.evaluator?.id).toBe("clip-similarity");
+  });
+
+  it("disables the impossible option rather than hiding it", async () => {
+    // A vanishing option reads as a bug in the form; a disabled one with a
+    // reason reads as information.
+    await renderForm();
+    const user = userEvent.setup();
+    await user.selectOptions(problemSelect(), "image-prompt");
+
+    await waitFor(() => {
+      const local = [...evaluatorSelect().options].find((o) => o.value === "local");
+      expect(local?.disabled).toBe(true);
+      expect(local?.text).toMatch(/cannot score this problem/);
+    });
+  });
+
+  it("keeps the in-process evaluator selectable for ordinary problems", async () => {
+    await renderForm();
+    expect(evaluatorSelect().value).toBe("local");
+    const local = [...evaluatorSelect().options].find((o) => o.value === "local");
+    expect(local?.disabled).toBe(false);
   });
 });

@@ -512,20 +512,37 @@ describe("rejecting a run whose encoding contradicts the problem", () => {
 });
 
 describe("reporting why a run failed", () => {
-  /** An image run left on the default in-process evaluator, which cannot score it. */
+  /**
+   * An evaluator that fails while the run is under way.
+   *
+   * These tests originally provoked the failure with an image problem on the
+   * in-process evaluator. genebaer-gdv now refuses that pairing at creation,
+   * so it never becomes a run at all — which is the point of that fix, and
+   * means this needs a fault that happens at RUNTIME instead.
+   */
+  class AlwaysFails extends FitnessEvaluator<unknown> {
+    static override readonly operatorId = "always-fails";
+    static override readonly displayName = "Always fails";
+    static override readonly description = "Test evaluator.";
+    static override readonly paramsSchema = {};
+    evaluateBatch(): Promise<number[]> {
+      return Promise.reject(
+        new Error("the scorer refused: cannot be scored in-process here"),
+      );
+    }
+  }
+
+  async function bootWithFailingEvaluator(): Promise<string> {
+    const registry = createServerRegistry().register("evaluator", AlwaysFails);
+    app = createServer({ dbPath: ":memory:", logger: false, registry });
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const addr = app.app.server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    return `http://127.0.0.1:${port}`;
+  }
+
   function unscorableConfig(): RunConfig {
-    return {
-      problem: { id: "image-prompt", params: { prompt: "a cat" } },
-      encoding: { id: "numeric", params: { dimensions: 240, min: 0, max: 1 } },
-      selection: { id: "tournament" },
-      crossover: { id: "uniform" },
-      mutation: { id: "gaussian" },
-      mutationRate: 0.05,
-      populationSize: 8,
-      elitism: 1,
-      termination: [{ id: "max-generations", params: { maxGenerations: 3 } }],
-      seed: 1,
-    };
+    return { ...oneMaxConfig(), evaluator: { id: "always-fails" } };
   }
 
   async function failedRun(baseUrl: string): Promise<RunDetail> {
@@ -548,18 +565,18 @@ describe("reporting why a run failed", () => {
   it("persists the reason, so a reload still explains the failure", async () => {
     // genebaer-29p: this returned status 'error' with stopReason null. The
     // engine's message — which names the fix — existed only in server stdout.
-    const { baseUrl } = await bootServer();
+    const baseUrl = await bootWithFailingEvaluator();
     const detail = await failedRun(baseUrl);
     expect(detail.stopReason).toBeTruthy();
-    expect(detail.stopReason).toMatch(/cannot be scored in-process/);
-    // The advice is the valuable part; it must survive intact.
-    expect(detail.stopReason).toMatch(/clip-similarity/);
+    expect(detail.stopReason).toMatch(/the scorer refused/);
+    // The whole message must survive, not just its first clause.
+    expect(detail.stopReason).toMatch(/cannot be scored in-process here/);
   });
 
   it("marks the failed run terminal, so elapsed time is not zero", async () => {
     // setStatus left finished_at null, so the UI computed elapsed from
     // createdAt and displayed 0 for a run that plainly ran.
-    const { baseUrl } = await bootServer();
+    const baseUrl = await bootWithFailingEvaluator();
     const detail = await failedRun(baseUrl);
     expect(detail.finishedAt).toBeTypeOf("number");
     expect(detail.finishedAt!).toBeGreaterThanOrEqual(detail.createdAt);

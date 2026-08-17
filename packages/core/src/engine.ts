@@ -30,6 +30,30 @@ export const DIVERSITY_MIN_SAMPLE = 5;
  * directly rather than inferred from a wall-clock measurement.
  */
 /**
+ * Reject a run whose evaluator cannot possibly score its problem.
+ *
+ * A model-backed problem's `evaluate()` exists only to throw, so pairing it
+ * with the in-process evaluator produces a run that dies on generation 0. That
+ * was the reported experience: pick the image problem, press start, get an
+ * error. Caught here it names the fix instead (genebaer-gdv).
+ */
+function assertEvaluatorCanScore<G>(
+  evaluator: FitnessEvaluator<G>,
+  problem: FitnessProblem<G>,
+  config: RunConfig,
+): void {
+  const inProcess = (evaluator.constructor as typeof FitnessEvaluator).scoresInProcess;
+  const scorable = (problem.constructor as typeof FitnessProblem).scorableInProcess;
+  if (!inProcess || scorable) return;
+
+  throw new RangeError(
+    `Problem '${config.problem.id}' cannot be scored in-process, but evaluator ` +
+      `'${config.evaluator?.id ?? "local"}' does exactly that. Choose a ` +
+      `model-backed evaluator (for example 'clip-similarity').`,
+  );
+}
+
+/**
  * Reject a run whose encoding produces genomes the problem cannot use.
  *
  * Some problems need an exact genome length: Weasel one gene per target
@@ -162,6 +186,8 @@ export class GeneticAlgorithmEngine<G = unknown> {
       config.evaluator?.id ?? "local",
       config.evaluator?.params,
     );
+    assertEvaluatorCanScore(this.evaluator, this.problem, config);
+
     this.selection = registry.create<SelectionOperator<G>>(
       "selection",
       config.selection.id,

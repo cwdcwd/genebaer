@@ -19,6 +19,18 @@ export abstract class FitnessProblem<G = unknown> extends BaseOperator {
   /** Encoding ids this problem can evaluate. */
   static readonly compatibleEncodings: readonly string[] = [];
 
+  /**
+   * Whether `evaluate()` can actually score a genome in this process.
+   *
+   * True for every ordinary problem. False where fitness is a model's
+   * judgement — ImagePrompt's `evaluate()` exists only to throw, because
+   * scoring an image against a prompt needs inference that cannot happen
+   * inline. Static rather than an instance getter so the registry can publish
+   * it without constructing the problem, exactly as `compatibleEncodings`
+   * already works (genebaer-gdv).
+   */
+  static readonly scorableInProcess: boolean = true;
+
   abstract evaluate(genome: G): number;
 
   /** Optional: current-best payload for the frontend canvas visualizer. */
@@ -40,4 +52,6 @@ export abstract class FitnessProblem<G = unknown> extends BaseOperator {
   get requiredGenomeLength(): number | null {
     return null;
   }
+
+
 }

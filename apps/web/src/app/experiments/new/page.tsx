@@ -40,6 +40,23 @@ function refToState(ref: OperatorRef, schema: Record<string, JSONSchema>): Opera
   };
 }
 
+/**
+ * Whether this evaluator can score this problem at all.
+ *
+ * Only one pairing is impossible: an in-process evaluator against a problem
+ * that cannot be scored in-process. Everything else is allowed, so adding a
+ * problem or an evaluator needs no change here.
+ */
+function canScore(
+  evaluatorMeta: OperatorMeta,
+  problemMeta: OperatorMeta | undefined,
+): boolean {
+  if (problemMeta?.scorableInProcess === false && evaluatorMeta.scoresInProcess) {
+    return false;
+  }
+  return true;
+}
+
 function compatible(
   meta: OperatorMeta,
   encodingId: string | undefined,
@@ -208,13 +225,24 @@ export default function NewExperimentPage() {
     }
   }, [operators, problem, problems]);
 
-  // Default to 'local', which is exactly what the engine picks for a config
-  // that omits the field — so adding this section changes no existing run.
+  /**
+   * Pick an evaluator that can actually score the chosen problem.
+   *
+   * Normally 'local', exactly what the engine picks for a config omitting the
+   * field. But a problem whose evaluate() only throws cannot be scored
+   * in-process, and defaulting to 'local' there built a run that died on
+   * generation 0 — the reported failure behind genebaer-gdv. Re-runs when the
+   * problem changes, so switching to an image problem moves the evaluator with
+   * it rather than leaving an impossible pairing selected.
+   */
   useEffect(() => {
-    if (evaluator || evaluators.length === 0) return;
-    const chosen = evaluators.find((e) => e.id === DEFAULT_EVALUATOR_ID) ?? evaluators[0]!;
+    if (evaluators.length === 0) return;
+    const usable = evaluators.filter((e) => canScore(e, problemMeta));
+    if (usable.length === 0) return;
+    if (evaluator && usable.some((e) => e.id === evaluator.id)) return;
+    const chosen = usable.find((e) => e.id === DEFAULT_EVALUATOR_ID) ?? usable[0]!;
     setEvaluator({ id: chosen.id, params: defaultsFromSchema(chosen.paramsSchema) });
-  }, [evaluator, evaluators]);
+  }, [evaluator, evaluators, problemMeta]);
 
   useEffect(() => {
     if (!problem) return;
@@ -562,11 +590,14 @@ export default function NewExperimentPage() {
             }}
           >
             {evaluators.map((ev) => (
-              <option key={ev.id} value={ev.id}>
+              <option key={ev.id} value={ev.id} disabled={!canScore(ev, problemMeta)}>
                 {/* The version is part of what a score MEANS: two versions are
                     not comparable, so it belongs next to the name. */}
                 {ev.displayName}
                 {ev.version ? ` (${ev.version})` : ""}
+                {/* Disabled and labelled rather than hidden: an option that
+                    silently vanishes reads as a bug in the form. */}
+                {canScore(ev, problemMeta) ? "" : " — cannot score this problem"}
               </option>
             ))}
           </Select>
@@ -576,6 +607,19 @@ export default function NewExperimentPage() {
           {evaluators.length === 0 && (
             <p className="text-xs text-muted">No evaluators registered.</p>
           )}
+          {problemMeta?.scorableInProcess === false && (
+            <p className="mt-2 text-xs text-warn">
+              {problemMeta.displayName} is scored by a model, not in-process, so
+              it needs a model-backed evaluator and a worker to run it.
+            </p>
+          )}
+          {evaluators.length > 0 &&
+            !evaluators.some((ev) => canScore(ev, problemMeta)) && (
+              <p className="mt-2 text-xs text-danger">
+                No registered evaluator can score this problem. Register one on
+                the server, or choose a different problem.
+              </p>
+            )}
           {evaluator && evaluatorMeta && Object.keys(evaluatorMeta.paramsSchema).length > 0 && (
             <div className="mt-3">
               <ParamsForm
