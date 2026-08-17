@@ -76,14 +76,35 @@ export function payloadToPixels(job: EvalJobPayload): {
   };
 }
 
-/** Default loader: pull transformers.js from the CDN and prepare CLIP on WebGPU. */
+/** Which backend transformers.js should use in this browser. */
+export type ClipDevice = "webgpu" | "wasm";
+
+/**
+ * Prefer WebGPU, fall back to WASM.
+ *
+ * WebGPU is far faster and worth preferring, but it is not required: the
+ * server-side scorer passes no device option at all and runs CLIP on CPU at
+ * roughly 15ms an image. Refusing to score without WebGPU was a self-imposed
+ * limit that turned "slower" into "impossible" for anyone on a browser without
+ * it — and the message it showed pointed at a server-side worker that does not
+ * exist (genebaer-v5f).
+ */
+export function pickDevice(nav: NavigatorLike = navigator as NavigatorLike): ClipDevice {
+  return nav.gpu ? "webgpu" : "wasm";
+}
+
+/**
+ * Just the part of `navigator` this cares about.
+ *
+ * `Navigator` has no `gpu` in the DOM lib this project builds against, so the
+ * parameter is typed structurally rather than asserted at each call site.
+ */
+export interface NavigatorLike {
+  gpu?: unknown;
+}
+
+/** Default loader: pull transformers.js from the CDN and prepare CLIP. */
 export const loadFromCdn: PipelineLoader = async () => {
-  const gpu = (navigator as { gpu?: unknown }).gpu;
-  if (!gpu) {
-    throw new Error(
-      "This browser has no WebGPU, so it cannot score. Enable WebGPU, or run a server-side worker instead.",
-    );
-  }
   const t = (await import(/* webpackIgnore: true */ CDN)) as {
     RawImage: ClipPipelines["RawImage"];
     AutoProcessor: { from_pretrained: (id: string) => Promise<unknown> };
@@ -95,7 +116,7 @@ export const loadFromCdn: PipelineLoader = async () => {
       from_pretrained: (id: string, o: unknown) => Promise<unknown>;
     };
   };
-  const opts = { device: "webgpu" };
+  const opts = { device: pickDevice() };
   const [processor, tokenizer, visionModel, textModel] = await Promise.all([
     t.AutoProcessor.from_pretrained(MODEL_ID),
     t.AutoTokenizer.from_pretrained(MODEL_ID),
