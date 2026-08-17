@@ -28,7 +28,8 @@ import {
   GeneticAlgorithmEngine,
   type RunConfig,
   type GenerationStats,
-  type FitnessProblem,
+  FitnessProblem,
+  FitnessEvaluator,
 } from "./index.js";
 
 // ---------- RNG ----------
@@ -560,5 +561,81 @@ describe("problems refusing a wrong-sized genome directly", () => {
     );
     expect(() => mds.evaluate([1, 0, 1])).toThrow(/3 genes but the graph has 7/);
     expect(() => mds.evaluate(new Array<number>(7).fill(0))).not.toThrow();
+  });
+});
+
+describe("rejecting an evaluator that cannot score the problem", () => {
+  /** A problem whose evaluate() only throws, like a model-backed one. */
+  class ModelScored extends FitnessProblem<number[]> {
+    static override readonly operatorId = "model-scored";
+    static override readonly displayName = "Model scored";
+    static override readonly description = "Test problem.";
+    static override readonly paramsSchema = {};
+    static override readonly compatibleEncodings = ["binary"] as const;
+    static override readonly scorableInProcess = false;
+    override evaluate(): number {
+      throw new Error("scored by a model, not in-process");
+    }
+  }
+
+  function config(evaluatorId?: string): RunConfig {
+    return {
+      problem: { id: "model-scored" },
+      encoding: { id: "binary", params: { length: 8 } },
+      selection: { id: "tournament" },
+      crossover: { id: "one-point" },
+      mutation: { id: "bit-flip" },
+      mutationRate: 0.05,
+      populationSize: 6,
+      elitism: 1,
+      termination: [{ id: "max-generations", params: { maxGenerations: 1 } }],
+      seed: 3,
+      ...(evaluatorId ? { evaluator: { id: evaluatorId } } : {}),
+    };
+  }
+
+  const registry = () => createDefaultRegistry().register("problem", ModelScored);
+
+  it("refuses the local evaluator before a generation runs", () => {
+    // genebaer-gdv, as reported: choosing the image problem and pressing Start
+    // produced a run that died on generation 0 with no explanation.
+    expect(() => new GeneticAlgorithmEngine(config("local"), registry())).toThrow(
+      /cannot be scored in-process/,
+    );
+  });
+
+  it("catches the same mistake when the config omits the evaluator", () => {
+    // Omitting it means 'local', so the check must not depend on the field
+    // being present.
+    expect(() => new GeneticAlgorithmEngine(config(), registry())).toThrow(
+      /cannot be scored in-process/,
+    );
+  });
+
+  it("names a fix rather than only the problem", () => {
+    expect(() => new GeneticAlgorithmEngine(config("local"), registry())).toThrow(
+      /model-backed evaluator/,
+    );
+  });
+
+  it("allows an evaluator that does not score in-process", () => {
+    class Remote extends FitnessEvaluator<number[]> {
+      static override readonly operatorId = "remote-ish";
+      static override readonly displayName = "Remote";
+      static override readonly description = "Test evaluator.";
+      static override readonly paramsSchema = {};
+      evaluateBatch(genomes: readonly number[][]): Promise<number[]> {
+        return Promise.resolve(genomes.map(() => 1));
+      }
+    }
+    const r = registry().register("evaluator", Remote);
+    expect(() => new GeneticAlgorithmEngine(config("remote-ish"), r)).not.toThrow();
+  });
+
+  it("leaves ordinary problems alone under the local evaluator", () => {
+    // OneMax is scored in-process and must stay that way; a check that fired
+    // here would break every default run.
+    const cfg: RunConfig = { ...config("local"), problem: { id: "one-max" } };
+    expect(() => new GeneticAlgorithmEngine(cfg, createDefaultRegistry())).not.toThrow();
   });
 });

@@ -31,6 +31,16 @@ export abstract class FitnessEvaluator<G = unknown> extends BaseOperator {
   declare static readonly operatorId: string;
 
   /**
+   * Whether this evaluator computes fitness by calling `problem.evaluate()`
+   * inline, in this process.
+   *
+   * False by default: anything that queues work, uses threads, or talks to a
+   * remote worker does not. Only the in-process evaluator says true, and it is
+   * the one pairing that a model-backed problem cannot use.
+   */
+  static readonly scoresInProcess: boolean = false;
+
+  /**
    * Score an entire population. Called once per generation, not once per
    * individual: a round trip per genome is what makes a remote evaluator
    * unusable, so batching is part of the contract rather than an optimization.

@@ -14,6 +14,7 @@ import { FitnessEvaluator, type EvaluationContext } from "./base.js";
  */
 export class LocalEvaluator extends FitnessEvaluator<unknown> {
   static override readonly operatorId = "local";
+  static override readonly scoresInProcess = true;
   static override readonly displayName = "Local (in-process)";
   static override readonly description =
     "Scores the population in-process by calling the problem directly. Default.";

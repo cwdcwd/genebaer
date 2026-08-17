@@ -95,6 +95,13 @@ export class ImagePrompt extends FitnessProblem<number[]> {
   static override readonly description =
     "Evolve an image toward a text prompt. Requires a model-backed evaluator.";
   static override readonly compatibleEncodings = ["numeric", "binary"] as const;
+  /**
+   * False: `evaluate()` exists only to throw.
+   *
+   * Fitness here is a model's judgement, so pairing this problem with the
+   * in-process evaluator produces a run that cannot survive generation 0.
+   */
+  static override readonly scorableInProcess = false;
   static override readonly paramsSchema = PARAMS_SCHEMA;
 
   readonly shape: ImageShape;
@@ -167,6 +174,8 @@ export class ImagePrompt extends FitnessProblem<number[]> {
   override get requiredGenomeLength(): number {
     return this.genomeLength;
   }
+
+
 
   /** Genes a genome must have for this problem's configuration. */
   get genomeLength(): number {

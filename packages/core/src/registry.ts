@@ -72,6 +72,16 @@ export class OperatorRegistry {
         if (typeof sizeParam === "string" && sizeParam.length > 0) {
           meta.sizeParam = sizeParam;
         }
+        // Published only when they differ from the ordinary case, so the
+        // metadata stays quiet for the problems and evaluators that pair fine.
+        const scorable = (ctor as OperatorConstructor & {
+          scorableInProcess?: unknown;
+        }).scorableInProcess;
+        if (scorable === false) meta.scorableInProcess = false;
+        const scores = (ctor as OperatorConstructor & { scoresInProcess?: unknown })
+          .scoresInProcess;
+        if (scores === true) meta.scoresInProcess = true;
+
         out.push(meta);
       }
     }

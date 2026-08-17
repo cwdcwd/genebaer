@@ -77,6 +77,16 @@ export interface OperatorMeta {
    * someone adds an encoding.
    */
   sizeParam?: string;
+  /**
+   * Present only on the exceptions, so ordinary operators stay quiet.
+   *
+   * `false` on a problem means `evaluate()` cannot score in this process, so
+   * an in-process evaluator can never run it. `true` on an evaluator means it
+   * is the in-process one. A UI pairing those two builds a run that dies on
+   * generation 0, which is what genebaer-gdv was.
+   */
+  scorableInProcess?: boolean;
+  scoresInProcess?: boolean;
 }
 
 // ---------- Run configuration ----------
