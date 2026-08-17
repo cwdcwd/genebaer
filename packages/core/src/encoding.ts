@@ -33,6 +33,17 @@ export abstract class Encoding<G> extends BaseOperator {
   /** Number of genes (length). */
   abstract size(genome: G): number;
 
+  /**
+   * Genes every genome from this encoding will have, or null if it varies.
+   *
+   * Read from the encoding's own parsed params rather than by generating a
+   * genome and measuring it: `random()` would consume the seeded RNG, and a
+   * validation check must not change what a seeded run produces.
+   */
+  get genomeSize(): number | null {
+    return null;
+  }
+
   /** Deep copy. Implementations must not alias mutable internals. */
   abstract clone(genome: G): G;
 

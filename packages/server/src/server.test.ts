@@ -453,3 +453,58 @@ describe("POST /api/problems/:id/genome-length", () => {
     expect(res.status).toBe(422);
   });
 });
+
+describe("rejecting a run whose encoding contradicts the problem", () => {
+  function mismatchedConfig(length: number): RunConfig {
+    return {
+      problem: { id: "weasel", params: { target: "METHINKS IT IS LIKE A WEASEL" } },
+      encoding: { id: "string", params: { length } },
+      selection: { id: "tournament" },
+      crossover: { id: "uniform" },
+      mutation: { id: "char" },
+      mutationRate: 0.05,
+      populationSize: 8,
+      elitism: 1,
+      termination: [{ id: "max-generations", params: { maxGenerations: 2 } }],
+      seed: 1,
+    };
+  }
+
+  it("422s instead of starting a run that optimises the wrong thing", async () => {
+    // genebaer-1os: this returned 200. Weasel scored against the 28-character
+    // overlap and ignored the surplus four genes, so the run looked healthy
+    // while optimising something other than what was asked for.
+    const { baseUrl } = await bootServer();
+    const res = await fetch(`${baseUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: mismatchedConfig(32) }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/exactly 28 genes/);
+    expect(body.error).toMatch(/produces 32/);
+  });
+
+  it("creates no run row for the rejected config", async () => {
+    // A 422 that still persisted a run would leave a corpse in the history.
+    const { baseUrl } = await bootServer();
+    await fetch(`${baseUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: mismatchedConfig(32) }),
+    });
+    const runs = (await (await fetch(`${baseUrl}/api/runs`)).json()) as unknown[];
+    expect(runs).toHaveLength(0);
+  });
+
+  it("still accepts the correctly sized config", async () => {
+    const { baseUrl } = await bootServer();
+    const res = await fetch(`${baseUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: mismatchedConfig(28) }),
+    });
+    expect(res.status).toBe(200);
+  });
+});

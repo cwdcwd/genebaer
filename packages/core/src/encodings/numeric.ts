@@ -50,6 +50,10 @@ export class NumericVectorEncoding extends Encoding<number[]> {
     }
   }
 
+  override get genomeSize(): number {
+    return this.dimensions;
+  }
+
   random(rng: RandomSource): number[] {
     const g = new Array<number>(this.dimensions);
     const span = this.max - this.min;

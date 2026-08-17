@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   SeededRandomSource,
   BinaryEncoding,
@@ -28,6 +28,7 @@ import {
   GeneticAlgorithmEngine,
   type RunConfig,
   type GenerationStats,
+  type FitnessProblem,
 } from "./index.js";
 
 // ---------- RNG ----------
@@ -444,5 +445,120 @@ describe("GeneticAlgorithmEngine", () => {
     engine.start();
     await done;
     expect(engine.bestFitness).toBeGreaterThanOrEqual(target.length - 1);
+  });
+});
+
+describe("rejecting a genome size the problem cannot use", () => {
+  /** A config pairing weasel with a string encoding of the given length. */
+  function weaselConfig(target: string, length: number): RunConfig {
+    return {
+      problem: { id: "weasel", params: { target } },
+      encoding: { id: "string", params: { length } },
+      selection: { id: "tournament" },
+      crossover: { id: "one-point" },
+      mutation: { id: "char" },
+      mutationRate: 0.05,
+      populationSize: 6,
+      elitism: 1,
+      termination: [{ id: "max-generations", params: { maxGenerations: 1 } }],
+      seed: 3,
+    };
+  }
+
+  it("throws at construction, before a single generation runs", () => {
+    // genebaer-1os: this used to be accepted. Weasel scored against
+    // min(genome.length, target.length), so the surplus genes were ignored and
+    // the run optimised a prefix of the target while looking healthy.
+    expect(
+      () => new GeneticAlgorithmEngine(weaselConfig("HELLO", 32), createDefaultRegistry()),
+    ).toThrow(/needs a genome of exactly 5 genes.*produces 32/s);
+  });
+
+  it("names the param to change, not just the mismatch", () => {
+    // An error that only reports the numbers leaves the reader hunting for
+    // which of two operators to edit.
+    expect(
+      () => new GeneticAlgorithmEngine(weaselConfig("HELLO", 32), createDefaultRegistry()),
+    ).toThrow(/'string' encoding's length to 5/);
+  });
+
+  it("accepts the correctly sized pairing", () => {
+    expect(
+      () => new GeneticAlgorithmEngine(weaselConfig("HELLO", 5), createDefaultRegistry()),
+    ).not.toThrow();
+  });
+
+  it("catches an mds graph paired with the wrong vertex count", () => {
+    const config: RunConfig = {
+      problem: { id: "mds", params: { graph: "cycle7" } },
+      encoding: { id: "binary", params: { length: 10 } },
+      selection: { id: "tournament" },
+      crossover: { id: "one-point" },
+      mutation: { id: "bit-flip" },
+      mutationRate: 0.05,
+      populationSize: 6,
+      elitism: 1,
+      termination: [{ id: "max-generations", params: { maxGenerations: 1 } }],
+      seed: 3,
+    };
+    expect(() => new GeneticAlgorithmEngine(config, createDefaultRegistry())).toThrow(
+      /exactly 7 genes.*produces 10/s,
+    );
+  });
+
+  it("leaves problems alone that genuinely work at any length", () => {
+    // OneMax scores whatever the encoding produces. Rejecting here would break
+    // a perfectly valid run, so the check must apply only to a KNOWN mismatch.
+    const config: RunConfig = {
+      problem: { id: "one-max" },
+      encoding: { id: "binary", params: { length: 37 } },
+      selection: { id: "tournament" },
+      crossover: { id: "one-point" },
+      mutation: { id: "bit-flip" },
+      mutationRate: 0.05,
+      populationSize: 6,
+      elitism: 1,
+      termination: [{ id: "max-generations", params: { maxGenerations: 1 } }],
+      seed: 3,
+    };
+    expect(() => new GeneticAlgorithmEngine(config, createDefaultRegistry())).not.toThrow();
+  });
+
+  it("measures the encoding without generating a genome", () => {
+    // The check reads the encoding's parsed params on purpose. Calling
+    // random() to measure a genome would advance the seeded RNG, and a
+    // validation step must not change what a seeded run produces.
+    const spy = vi.spyOn(StringEncoding.prototype, "random");
+    try {
+      new GeneticAlgorithmEngine(weaselConfig("HELLO", 5), createDefaultRegistry());
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("problems refusing a wrong-sized genome directly", () => {
+  it("weasel throws rather than scoring against the overlap", () => {
+    const weasel = createDefaultRegistry().create<FitnessProblem<string>>(
+      "problem",
+      "weasel",
+      { target: "HELLO" },
+    );
+    // "HELLO WORLD" shares a 5-character prefix with the target; truncating
+    // would have scored it a perfect 5.
+    expect(() => weasel.evaluate("HELLO WORLD")).toThrow(/11 genes but the target/);
+    expect(() => weasel.evaluate("HEL")).toThrow(/needs 5/);
+    expect(weasel.evaluate("HELLO")).toBe(5);
+  });
+
+  it("mds throws rather than treating missing vertices as unselected", () => {
+    const mds = createDefaultRegistry().create<FitnessProblem<number[]>>(
+      "problem",
+      "mds",
+      { graph: "cycle7" },
+    );
+    expect(() => mds.evaluate([1, 0, 1])).toThrow(/3 genes but the graph has 7/);
+    expect(() => mds.evaluate(new Array<number>(7).fill(0))).not.toThrow();
   });
 });

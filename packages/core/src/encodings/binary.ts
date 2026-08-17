@@ -28,6 +28,10 @@ export class BinaryEncoding extends Encoding<number[]> {
     );
   }
 
+  override get genomeSize(): number {
+    return this.length;
+  }
+
   random(rng: RandomSource): number[] {
     const g = new Array<number>(this.length);
     for (let i = 0; i < this.length; i++) g[i] = rng.next() < 0.5 ? 0 : 1;
