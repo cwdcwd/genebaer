@@ -23,6 +23,33 @@ import type { CaptionQueue } from "./eval/caption-queue.js";
  * Runs execute in-process; the engine yields to the event loop each
  * generation via setImmediate, so the server stays responsive.
  */
+/**
+ * A message worth showing a person, from whatever the engine threw.
+ *
+ * Engine failures are frequently misconfigurations with genuinely useful
+ * advice attached — "configure a model-backed evaluator (for example
+ * 'clip-similarity')" tells the reader exactly what to do next. That text is
+ * the whole value here, so it must survive to the UI intact rather than being
+ * flattened to "Error" or an empty string.
+ *
+ * `cause` is appended when present: an evaluator failure often wraps the real
+ * reason (a worker's rejection, a missing model) inside a generic outer error.
+ */
+function errorReason(err: unknown): string {
+  if (err instanceof Error) {
+    const cause = err.cause;
+    const causeText =
+      cause instanceof Error && cause.message && cause.message !== err.message
+        ? ` (caused by: ${cause.message})`
+        : "";
+    return (err.message || err.name || "Unknown engine error") + causeText;
+  }
+  if (typeof err === "string" && err.length > 0) return err;
+  // Never return an empty string: the UI treats a falsy reason as "no detail
+  // available", which is the exact failure this is fixing.
+  return `Unknown engine error (${typeof err})`;
+}
+
 export class RunManager {
   private readonly engines = new Map<string, GeneticAlgorithmEngine<unknown>>();
   private readonly registry: OperatorRegistry;
@@ -313,7 +340,20 @@ export class RunManager {
     }));
 
     offs.push(engine.on("error", (err) => {
-      this.store.setStatus(id, "error");
+      const reason = errorReason(err);
+      // Flush buffered stats first: the generations that DID run are the most
+      // useful context for reading the failure, and dropping them would leave
+      // an errored run looking as if it never started.
+      const buf = this.pendingStats.get(id);
+      if (buf && buf.length > 0) {
+        this.store.writeGenerations(id, buf);
+        this.pendingStats.delete(id);
+      }
+      // markTerminal rather than setStatus: an errored run IS terminal, and
+      // setStatus leaves finished_at null, which made the UI compute elapsed
+      // time from createdAt and display 0 for a run that plainly ran.
+      this.store.markTerminal(id, "error", engine.bestFitness, reason);
+      this.broadcast(id, { type: "error", runId: id, reason });
       this.broadcast(id, { type: "status", runId: id, status: "error" });
       console.error(`[run ${id}] engine error:`, err);
     }));

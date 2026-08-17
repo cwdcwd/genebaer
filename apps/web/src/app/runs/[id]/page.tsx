@@ -97,6 +97,11 @@ export default function RunDetailPage({
   const visualData =
     stream.lastBest?.genome ?? stats[stats.length - 1]?.bestGenome ?? visualFrame;
 
+  // Live frame first, persisted reason second: a page opened after the failure
+  // (or reloaded) must still explain it, not just report that it happened.
+  const failureReason =
+    status === "error" ? (stream.failure ?? detail?.stopReason ?? null) : null;
+
   if (loadError === 404) {
     return (
       <div className="mx-auto max-w-md py-20 text-center">
@@ -140,6 +145,16 @@ export default function RunDetailPage({
         )}
         <span className="mono ml-auto text-xs text-muted">{detail.id}</span>
       </div>
+
+      {status === "error" && (
+        <div className="rounded-md border border-danger/50 bg-danger/10 p-3">
+          <div className="text-sm font-medium text-danger">This run failed</div>
+          <p className="mono mt-1 whitespace-pre-wrap text-[11px] text-danger">
+            {failureReason ??
+              "No reason was recorded. Check the server log for this run id."}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_400px]">
         {/* Left column — charts */}

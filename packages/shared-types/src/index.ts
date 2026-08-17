@@ -202,6 +202,15 @@ export type WsServerMessage =
     }
   | { type: "status"; runId: string; status: RunStatus }
   /**
+   * A run failed, and why.
+   *
+   * Separate from `status` rather than an optional field on it, because a
+   * client must not have to inspect a status message to discover there is a
+   * message to show. Previously the reason existed only in the server's
+   * stdout: the UI was told a run had errored and could say nothing about it.
+   */
+  | { type: "error"; runId: string; reason: string }
+  /**
    * A human-readable note about a generation - currently a VLM caption of the
    * best genome. Explicitly NOT fitness: it is a progress check for a person,
    * never an input to selection.

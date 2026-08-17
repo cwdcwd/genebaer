@@ -146,7 +146,7 @@ describe("RunSummary / RunDetail", () => {
 describe("WebSocket protocol", () => {
   it("discriminates server messages on `type`", () => {
     expectTypeOf<WsServerMessage["type"]>().toEqualTypeOf<
-      "generation" | "best" | "finished" | "status" | "annotation"
+      "generation" | "best" | "finished" | "status" | "annotation" | "error"
     >();
   });
 
@@ -253,7 +253,7 @@ describe("Worker protocol", () => {
 describe("annotations", () => {
   it("adds annotation to the server message union", () => {
     expectTypeOf<WsServerMessage["type"]>().toEqualTypeOf<
-      "generation" | "best" | "finished" | "status" | "annotation"
+      "generation" | "best" | "finished" | "status" | "annotation" | "error"
     >();
   });
 
@@ -302,5 +302,23 @@ describe("OperatorMeta.version", () => {
     };
     // @ts-expect-error a version is a contract string, never a number
     assertType<OperatorMeta>({ ...base, version: 2 });
+  });
+});
+
+describe("run failures", () => {
+  it("carries a reason, so a client is told why and not merely that", () => {
+    // The bug this closes: the engine's message existed only in the server's
+    // stdout, so the UI could report an error and nothing about it.
+    const msg = {} as WsServerMessage;
+    if (msg.type === "error") {
+      expectTypeOf(msg.reason).toEqualTypeOf<string>();
+      expectTypeOf(msg.runId).toEqualTypeOf<string>();
+    }
+  });
+
+  it("requires the reason rather than allowing it to be omitted", () => {
+    // @ts-expect-error an error frame without a reason is the old behaviour
+    assertType<WsServerMessage>({ type: "error", runId: "r1" });
+    assertType<WsServerMessage>({ type: "error", runId: "r1", reason: "boom" });
   });
 });
