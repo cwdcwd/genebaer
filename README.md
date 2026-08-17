@@ -64,6 +64,11 @@ Every GA aspect is an abstract base class with a static `operatorId` + JSON Sche
 
 It also hosts distributed evaluation: a job queue, a worker registry with versioned capability matching, leases with re-dispatch, and a score cache.
 
+Scoring workers are opt-in. `GENEBAER_WORKER_THREADS=4` starts in-process
+threads; otherwise a browser tab that opts in on the run page is the only
+worker. Model-backed scoring additionally needs `@huggingface/transformers`
+installed in `packages/server` — the server says at startup whether it is.
+
 REST (default `:4040`):
 ```
 GET    /api/operators                  registry metadata for UI forms

@@ -18,6 +18,12 @@ import { JobQueue } from "./eval/job-queue.js";
 import { setActiveQueue } from "./eval/queued-evaluator.js";
 import { WorkerRegistry } from "./eval/worker-registry.js";
 import { registerWorkerRoutes } from "./eval/worker-routes.js";
+import { WorkerPool } from "./eval/worker-pool.js";
+import {
+  modelRuntimeAvailable,
+  poolCapabilities,
+  startupReport,
+} from "./eval/pool-bootstrap.js";
 import { WorkerConnection, parseWorkerMessage } from "./eval/worker-socket.js";
 import { SqliteScoreCache, setActiveScoreCache } from "./eval/score-cache.js";
 import { CaptionQueue } from "./eval/caption-queue.js";
@@ -63,6 +69,14 @@ export interface ServerOptions {
   maxWorkerSilenceMs?: number;
   registry?: OperatorRegistry;
   logger?: boolean;
+  /**
+   * In-process scoring threads to start. 0 (the default) means none.
+   *
+   * Off by default on purpose: the models these threads need are an optional
+   * dependency, so starting threads that cannot load one would replace a
+   * missing worker with a failing one. See genebaer-7hs.
+   */
+  workerThreads?: number;
 }
 
 export interface GenebaerServer {
@@ -357,12 +371,32 @@ export function createServer(opts: ServerOptions = {}): GenebaerServer {
     });
   });
 
+  // Opt-in in-process workers. Until this existed, a browser tab was the only
+  // worker a running server could ever have (genebaer-7hs).
+  const threads = opts.workerThreads ?? 0;
+  let pool: WorkerPool | null = null;
+  if (threads > 0) {
+    const capabilities = poolCapabilities(runManager.operatorRegistry);
+    if (capabilities.length > 0) {
+      pool = new WorkerPool({ queue: jobQueue, registry: workerRegistry, capabilities, threads });
+      pool.start();
+    }
+    // Reported once here rather than per job: without this, a missing optional
+    // dependency looks like every run being broken instead of one install.
+    void modelRuntimeAvailable().then((available) => {
+      console.log(startupReport(threads, capabilities, available));
+    });
+  }
+
   app.addHook("onClose", async () => {
     // Order matters: halt the engines before closing the database they write to.
     clearInterval(supervisor);
     detachCaptions();
     captionQueue.clear();
     runManager.shutdown();
+    // Stop the threads before cancelling their work, so a pool mid-batch does
+    // not submit a score against a queue that has already been torn down.
+    await pool?.stop();
     jobQueue.cancelAll("Server is shutting down");
     setActiveQueue(null);
     setActiveScoreCache(null);
