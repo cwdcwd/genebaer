@@ -9,7 +9,7 @@ import {
   parseServerMessage,
   type WorkerClientView,
 } from "@/lib/worker-client";
-import { createClipScorer } from "@/lib/clip-browser";
+import { createClipScorer, pickDevice, type ClipDevice } from "@/lib/clip-browser";
 import {
   capabilityFromOperators,
   unsupportedMessage,
@@ -41,6 +41,16 @@ export function WorkerPanel() {
   });
   const [enabled, setEnabled] = useState(false);
   const [capability, setCapability] = useState<WorkerCapability | null>(null);
+  /**
+   * Which backend this tab will score on.
+   *
+   * Read once on mount rather than during render: `navigator` does not exist
+   * during SSR, and touching it in the render path would break the build.
+   */
+  const [device, setDevice] = useState<ClipDevice | null>(null);
+  useEffect(() => {
+    setDevice(pickDevice());
+  }, []);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const clientRef = useRef<WorkerClient | null>(null);
@@ -141,6 +151,19 @@ export function WorkerPanel() {
               ? `Contributes this browser to any run needing ${capability.evaluatorId}@${capability.version}.`
               : "Contributes this browser to any run needing CLIP scoring."}
           </div>
+          {device && (
+            <div className="mt-1 text-[11px] text-muted">
+              Backend: <span className="mono">{device}</span>
+              {device === "wasm" && (
+                // Said up front, not discovered by watching a counter barely
+                // move: WASM scores correctly but far slower than WebGPU.
+                <span className="text-warn">
+                  {" "}
+                  — no WebGPU here, so scoring will be much slower.
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <button
           type="button"

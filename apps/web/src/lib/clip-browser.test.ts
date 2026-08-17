@@ -5,6 +5,7 @@ import {
   cosine,
   createClipScorer,
   payloadToPixels,
+  pickDevice,
   type ClipPipelines,
 } from "./clip-browser";
 
@@ -117,9 +118,9 @@ describe("createClipScorer", () => {
     // A stand-in number would look like the system working while steering the
     // run at something unrelated to the prompt.
     const score = createClipScorer(() =>
-      Promise.reject(new Error("This browser has no WebGPU")),
+      Promise.reject(new Error("Failed to fetch the transformers CDN bundle")),
     );
-    await expect(score(job())).rejects.toThrow(/no WebGPU/);
+    await expect(score(job())).rejects.toThrow(/transformers CDN/);
   });
 });
 
@@ -193,5 +194,26 @@ describe("augmented scoring in the browser", () => {
     await expect(
       score({ ...j, params: { ...j.params, augmentations: 0 } }),
     ).rejects.toThrow(/positive integer/);
+  });
+});
+
+describe("choosing a backend", () => {
+  it("prefers WebGPU when the browser has it", () => {
+    expect(pickDevice({ gpu: {} })).toBe("webgpu");
+  });
+
+  it("falls back to WASM instead of refusing to score", () => {
+    // genebaer-v5f, as reported: this used to throw "This browser has no
+    // WebGPU, so it cannot score", which was a self-imposed limit. The server
+    // scores on CPU with no device option at all; a browser can too, slower.
+    expect(pickDevice({})).toBe("wasm");
+    expect(pickDevice({ gpu: undefined })).toBe("wasm");
+  });
+
+  it("never returns a backend transformers.js does not understand", () => {
+    // A typo here would surface as an opaque model-loading failure rather than
+    // anything mentioning the device.
+    expect(["webgpu", "wasm"]).toContain(pickDevice({ gpu: {} }));
+    expect(["webgpu", "wasm"]).toContain(pickDevice({}));
   });
 });

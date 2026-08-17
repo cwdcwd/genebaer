@@ -241,9 +241,19 @@ and guessing.
 
 | Kind | Transport | Notes |
 | --- | --- | --- |
-| Worker thread | in-process | `WorkerPool`; scoring never runs on the main thread, which would starve the engine's `setImmediate` loop |
+| Worker thread | in-process | `WorkerPool`; scoring never runs on the main thread, which would starve the engine's `setImmediate` loop. **Not started by the server** — see below |
 | Browser tab | `/ws/worker` | Same protocol; closing a tab returns its jobs immediately |
 | Anything else | `POST /api/workers/*` | Same protocol over HTTP |
+
+**`WorkerPool` is not wired into a running server.** It is real, tested code,
+but nothing outside the test suite constructs one, so the only worker a default
+server actually gets is a browser tab that opts in. Two things would have to
+change to make server-side scoring work: something must start a pool, and
+`@huggingface/transformers` must be installed — it is deliberately not a
+workspace dependency (~819MB with onnxruntime), so the CLIP scorer would
+otherwise fail with "requires @huggingface/transformers, which is not
+installed". Tracked as genebaer-7hs. Until then, do not tell a user to "run a
+server-side worker": there is nothing for them to run.
 
 The thread entry point and its scorers are plain `.mjs`, because a
 `worker_thread` needs a real file at runtime. `tsc` does not copy files it does
