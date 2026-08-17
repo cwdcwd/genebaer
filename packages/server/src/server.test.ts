@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import WebSocket from "ws";
+import { FitnessEvaluator } from "@genebaer/core";
 import { createServer, type GenebaerServer } from "./server.js";
+import { createServerRegistry } from "./registry.js";
 import type {
   CreateRunResponse,
   RunConfig,
@@ -506,5 +508,112 @@ describe("rejecting a run whose encoding contradicts the problem", () => {
       body: JSON.stringify({ config: mismatchedConfig(28) }),
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("reporting why a run failed", () => {
+  /** An image run left on the default in-process evaluator, which cannot score it. */
+  function unscorableConfig(): RunConfig {
+    return {
+      problem: { id: "image-prompt", params: { prompt: "a cat" } },
+      encoding: { id: "numeric", params: { dimensions: 240, min: 0, max: 1 } },
+      selection: { id: "tournament" },
+      crossover: { id: "uniform" },
+      mutation: { id: "gaussian" },
+      mutationRate: 0.05,
+      populationSize: 8,
+      elitism: 1,
+      termination: [{ id: "max-generations", params: { maxGenerations: 3 } }],
+      seed: 1,
+    };
+  }
+
+  async function failedRun(baseUrl: string): Promise<RunDetail> {
+    const { runId } = (await (
+      await fetch(`${baseUrl}/api/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: unscorableConfig() }),
+      })
+    ).json()) as CreateRunResponse;
+
+    for (let i = 0; i < 100; i++) {
+      const detail = (await (await fetch(`${baseUrl}/api/runs/${runId}`)).json()) as RunDetail;
+      if (detail.status === "error") return detail;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error("run never reached error status");
+  }
+
+  it("persists the reason, so a reload still explains the failure", async () => {
+    // genebaer-29p: this returned status 'error' with stopReason null. The
+    // engine's message — which names the fix — existed only in server stdout.
+    const { baseUrl } = await bootServer();
+    const detail = await failedRun(baseUrl);
+    expect(detail.stopReason).toBeTruthy();
+    expect(detail.stopReason).toMatch(/cannot be scored in-process/);
+    // The advice is the valuable part; it must survive intact.
+    expect(detail.stopReason).toMatch(/clip-similarity/);
+  });
+
+  it("marks the failed run terminal, so elapsed time is not zero", async () => {
+    // setStatus left finished_at null, so the UI computed elapsed from
+    // createdAt and displayed 0 for a run that plainly ran.
+    const { baseUrl } = await bootServer();
+    const detail = await failedRun(baseUrl);
+    expect(detail.finishedAt).toBeTypeOf("number");
+    expect(detail.finishedAt!).toBeGreaterThanOrEqual(detail.createdAt);
+  });
+
+  it("tells a subscribed client why, not merely that", async () => {
+    // Deliberately fails on a LATER generation. An immediate config failure
+    // races the subscription — the run is already dead before a client can
+    // subscribe, which is precisely why the reason is also persisted and the
+    // UI falls back to it. This exercises the live path a long-running failure
+    // actually takes, such as an evaluator dying mid-run.
+    class FailsLater extends FitnessEvaluator<unknown> {
+      static override readonly operatorId = "fails-on-third";
+      static override readonly displayName = "Fails on third";
+      static override readonly description = "Test evaluator.";
+      static override readonly paramsSchema = {};
+      private calls = 0;
+      evaluateBatch(genomes: unknown[]): Promise<number[]> {
+        this.calls += 1;
+        if (this.calls >= 3) {
+          return Promise.reject(new Error("scorer went away mid-run"));
+        }
+        return Promise.resolve(genomes.map(() => 1));
+      }
+    }
+    const registry = createServerRegistry().register("evaluator", FailsLater);
+    app = createServer({ dbPath: ":memory:", logger: false, registry });
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const addr = app.app.server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((resolve) => ws.on("open", resolve));
+
+    const errorFrame = new Promise<string>((resolve) => {
+      ws.on("message", (raw: Buffer) => {
+        const msg = JSON.parse(String(raw)) as WsServerMessage;
+        if (msg.type === "error") resolve(msg.reason);
+      });
+    });
+
+    const { runId } = (await (
+      await fetch(`${baseUrl}/api/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          config: { ...oneMaxConfig(), evaluator: { id: "fails-on-third" } },
+        }),
+      })
+    ).json()) as CreateRunResponse;
+    ws.send(JSON.stringify({ type: "subscribe", runId }));
+
+    expect(await errorFrame).toMatch(/scorer went away mid-run/);
+    ws.close();
   });
 });

@@ -39,6 +39,13 @@ export interface RunStream {
    * log, and an unbounded list would grow for the life of a run.
    */
   annotations: RunAnnotation[];
+  /**
+   * Why the run failed, when it did.
+   *
+   * Separate from `finished`: a run that errored did not finish, and merging
+   * the two would let a failure render as a completion.
+   */
+  failure: string | null;
 }
 
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -57,6 +64,7 @@ export function useRunStream(runId: string | null): RunStream {
   const [finished, setFinished] = useState<StreamFinished | null>(null);
   const [connected, setConnected] = useState(false);
   const [annotations, setAnnotations] = useState<RunAnnotation[]>([]);
+  const [failure, setFailure] = useState<string | null>(null);
 
   // Keep finished in a ref so reconnect logic can see it without re-running effects.
   const finishedRef = useRef<StreamFinished | null>(null);
@@ -107,6 +115,10 @@ export function useRunStream(runId: string | null): RunStream {
             break;
           case "status":
             setStatus(msg.status);
+            break;
+          case "error":
+            setFailure(msg.reason);
+            setStatus("error");
             break;
           case "annotation":
             setAnnotations((prev) => {
@@ -160,5 +172,5 @@ export function useRunStream(runId: string | null): RunStream {
     };
   }, [runId]);
 
-  return { stats, status, lastBest, finished, connected, annotations };
+  return { stats, status, lastBest, finished, connected, annotations, failure };
 }
